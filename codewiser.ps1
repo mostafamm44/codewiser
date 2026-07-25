@@ -378,6 +378,12 @@ foreach ($entry in $remoteFiles.GetEnumerator()) {
     $path = $entry.Key
     $remoteVer = $entry.Value
 
+    # Skip AGENTS.md — generated locally to avoid stale remote content
+    if ($path -eq 'AGENTS.md') {
+        Write-Host "     $path (generated locally)"
+        continue
+    }
+
     $localPath = $path.Replace('/', '\')
     $dest = "$TargetDir\$localPath"
     $url = "$RAW_BASE/$path"
@@ -412,15 +418,28 @@ Remove-Item $remoteManifest.FullName -Force -ErrorAction SilentlyContinue
 # Save updated local manifest
 Download -Url "$RAW_BASE/.agents/manifest.json" -Dest $localManifestPath | Out-Null
 
-# --- Customize AGENTS.md with mode-specific Execution Protocol ---
-if ($selectedMode -and (Test-Path "$TargetDir\AGENTS.md")) {
+# --- Ensure AGENTS.md exists with neutral header (never downloaded from remote) ---
+$agentsPath = "$TargetDir\AGENTS.md"
+$neutralHeader = @'
+# Shared AI Agent Instructions
+
+Global instructions and behavioral constraints live in this file.
+Project-specific scripts, technology choices, and setup instructions are documented in `README.md`.
+'@
+if (-not (Test-Path $agentsPath)) {
+    Set-Content -Path $agentsPath -Value $neutralHeader -NoNewline
+    Write-Host ">> Created AGENTS.md"
+}
+
+# --- Mark AGENTS.md with mode (bootstrap skill fills the full protocol) ---
+if ($selectedMode -and (Test-Path $agentsPath)) {
     $modeTitle = (Get-Culture).TextInfo.ToTitleCase(($selectedMode -replace '-', ' '))
     $protocolHeader = "## ${modeTitle} Execution Protocol"
 
-    $agentsContent = Get-Content "$TargetDir\AGENTS.md" -Raw
+    $agentsContent = Get-Content $agentsPath -Raw
     if ($agentsContent -notmatch [regex]::Escape($protocolHeader)) {
         Write-Host ""
-        Write-Host ">> Adding $modeTitle Execution Protocol to AGENTS.md..."
+        Write-Host ">> Marking AGENTS.md with $modeTitle mode..."
         $protocolSection = @"
 
 $protocolHeader
@@ -430,7 +449,7 @@ ${modeTitle} lifecycle defined below. The bootstrap skill will complete this
 section with the full protocol after initial project analysis.
 
 "@
-        Add-Content -Path "$TargetDir\AGENTS.md" -Value $protocolSection -NoNewline
+        Add-Content -Path $agentsPath -Value $protocolSection -NoNewline
     }
 }
 
