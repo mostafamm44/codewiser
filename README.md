@@ -14,7 +14,7 @@ Specs, plans, design options, architecture decisions — these are not paperwork
 
 ## How It Works
 
-A centralized `.agents/` directory and a universal `AGENTS.md` instruction file that every agent reads. Agents follow a **mode-tailored execution protocol**: depending on the selected mode (Prototype, Spec Driven, Rigid), they read relevant specs, create plans, explore options, and update artifacts before and after every code change.
+A centralized `.agents/` directory and a universal `AGENTS.md` instruction file that every agent reads. Agents follow a **mode-tailored execution protocol**: depending on the selected mode (Prototype, Spec Driven, or Rigid), they read relevant specs, create plans, explore options, and update artifacts before and after every code change.
 
 ```
 .agents/
@@ -45,23 +45,25 @@ A centralized `.agents/` directory and a universal `AGENTS.md` instruction file 
 ## Quick Start
 
 ```bash
-# 1. Run the interactive setup script with a target directory
-./codewiser.sh ./my-project
+# Interactively set up codewiser in a target project directory
+bunx codewiser my-project
 
-# 2. Select your AI agents and development mode (Prototype, Spec Driven, or Rigid)
-#    The script downloads the relevant skills, spec templates, and creates
-#    agent-specific configs with symlinks to the shared `.agents/skills/` directory.
+# Or via npm (after publishing)
+npx codewiser my-project
 
-# 3. Start coding — agents read shared context from AGENTS.md (customized with your
-#    mode's execution protocol), load skills from `.agents/skills/`, and follow the
-#    tailored workflow defined by the selected mode.
+# Or if linked locally
+codewiser my-project
 ```
 
-On Windows (PowerShell):
+The CLI guides you through an interactive session:
 
-```powershell
-.\codewiser.ps1 .\my-project
-```
+1. **Select AI agents** — Choose which coding agents to configure (OpenCode, Claude Code, Cursor, Antigravity, Kilo Code)
+2. **Configure mode** — Pick a development mode (Prototype, Spec Driven, or Rigid) — or select workflows in legacy mode
+3. **Download files** — Downloads shared skills, spec templates, and manifest from GitHub
+4. **Generate configs** — Creates agent-specific configuration files
+5. **Create symlinks** — Symlinks shared skills into each agent's private directory
+
+Use `← Back` options to navigate between steps. Press `Esc` at any time to exit.
 
 ## Supported Agents
 
@@ -89,19 +91,43 @@ Skills are shared across all agents. Create a file at `.agents/skills/<skill-nam
 
 Example: the [git-worktrees skill](.agents/skills/shared/git-worktrees/SKILL.md) was added to teach agents how to isolate feature work using branches and worktrees during concurrent multi-agent development.
 
-## Setup Scripts
-
-| Platform | Script | Source |
-|---|---|---|
-| Linux / macOS | `codewiser.sh` | Downloads `AGENTS.md`, skills, and specs from `https://github.com/yallma3/codewiser` |
-| Windows | `codewiser.ps1` | Same logic via PowerShell with `Invoke-WebRequest` |
-
-Both scripts use `manifest.json` to track artifact versions organized by development modes. During setup, you select which AI agents and which mode (**Prototype**, **Spec Driven**, or **Rigid**) to use. The selected mode determines which skills are downloaded and customizes `AGENTS.md` with the appropriate execution protocol.
-
 ## Requirements
 
-- Bash **or** PowerShell 5+
+- **Bun** (recommended) or **Node.js 18+**
 - Git
+
+## Development
+
+```bash
+# Clone and install
+git clone https://github.com/yallma3/codewiser-cli.git
+cd codewiser-cli
+bun install
+
+# Link globally (optional)
+bun link
+
+# Run directly
+bun start my-project
+
+# Or after linking
+codewiser my-project
+```
+
+## How the CLI Works
+
+The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interactive prompts and [meow](https://github.com/sindresorhus/meow) for CLI argument parsing. It downloads skills and specs from the [codewiser](https://github.com/yallma3/codewiser) repository based on a `manifest.json` that tracks artifact versions organized by development modes.
+
+### Architecture
+
+- `src/index.ts` — Entry point, parses CLI arguments, resolves target directory
+- `src/commands/init.ts` — State machine orchestrating the 5-step setup process
+- `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
+- `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
+- `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
+- `src/utils/manifest.ts` — Manifest parsing, version comparison, file flattening
+- `src/utils/generate-configs.ts` — Agent config file generation
+- `src/utils/symlinks.ts` — Symlink creation with admin retry and copy fallback
 
 ## License
 

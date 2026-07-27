@@ -1,0 +1,22 @@
+{
+  "name": "codewiser-cli",
+  "bin": {
+    "codewiser": "src/index.ts"
+  },
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0",
+    "meow": "^14.1.0",
+    "picocolors": "^1.1.1"
+  }
+}
