@@ -8,32 +8,6 @@ Project-specific scripts, technology choices, and setup instructions are documen
 - `.agents/specs/` — What the agents are building (System & Product Architecture).
 - `.agents/plans/` — How the agents will execute the current task (Short-term context).
 
-## Spec-Driven Execution Protocol
-
-All file modifications or code generation tasks MUST follow this lifecycle:
-
-### Read Phase
-1. Read `.agents/specs/product.md` to verify feature compliance.
-2. Read `.agents/specs/system.md` to ensure architectural alignment.
-3. Read `.agents/specs/ux.md` for UX and design system constraints.
-
-### Spec Creation Sequence (when establishing a new feature)
-1. **Bootstrap** — Initialize project context (`README.md`, `product.md`, `system.md`).
-2. **Git Worktrees & Branch Management** — create an isolated feature branch or worktree before planning and spec changes.
-3. **Create BRD** — Capture business requirements in `product_<domain>.md`.
-4. **Create UX Specs** — Define design system, personas, and UX requirements in `ux.md`.
-5. **Design DB** — Design relational schemas based on volumetric data; document in `system.md`.
-
-### Execution (per task)
-1. **Create Plan** — Break work into incremental, verifiable phases
-   (`.agents/plans/plan_YYMMDD_<name>.md`).
-2. **Implement Plan** — Execute phases, verify gates, retry up to 5 times on
-   failure. On success, update `.agents/specs/spec-index.json` and
-   `.agents/specs/product.md` as needed.
-
-### Core rule
-If an implementation changes the system design, update the relevant spec files
-first before writing production code.
 
 ## File Naming Conventions
 
