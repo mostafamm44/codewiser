@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from "fs";
-import { resolve } from "path";
+import { join, resolve } from "path";
 import {
   showTitle, showDone, stepHeader, info, warn, error, success, item, fileStatus, runSpinner, pick, confirmPrompt,
   BACK, EXIT,
@@ -39,55 +39,57 @@ export async function init(targetDirInput: string): Promise<void> {
   let skillDirs: string[] = [];
   let remoteFiles: Record<string, string> = {};
   let cachedManifest: Record<string, unknown> | null = null;
+  let agentStepVisited = false;
 
-  type Step = "agents" | "mode" | "download" | "configs" | "symlinks";
+  type Step = "agents" | "mode" | "confirm" | "done";
   let current: Step = "agents";
 
   const stepLabels: Record<Step, string> = {
     agents: "Select Agents",
     mode: "Configure Mode",
-    download: "Download Files",
-    configs: "Generate Configs",
-    symlinks: "Create Symlinks",
+    confirm: "Confirm Selections",
+    done: "",
   };
 
   let iterations = 0;
 
-  while (current !== "symlinks") {
+  while (current !== "done") {
     iterations++;
     if (iterations > 20) {
       error("Too many navigation steps. Aborting.");
       return;
     }
 
-    const stepNum = ["agents", "mode", "download", "configs", "symlinks"].indexOf(current) + 1;
+    const stepNum = ["agents", "mode", "confirm"].indexOf(current) + 1;
 
     stepHeader(stepNum, stepLabels[current]);
 
     switch (current) {
       case "agents": {
-        const result = await selectAgents();
-        if (result === EXIT) return;
-        if (result === BACK) {
-          const quit = await confirmPrompt("Quit codewiser?");
-          if (quit === EXIT) return;
-          if (quit === BACK) break;
-          if (quit) return;
-          break;
+        if (!agentStepVisited) {
+          agentStepVisited = true;
+          const detected = detectInstalledAgents(targetDir);
+          if (detected) {
+            agents = detected;
+            info(`Auto-detected: ${agentNames(detected).join(", ")}`);
+          }
+        } else {
+          agents = null;
         }
-        agents = result;
 
-        mkdirSync(`${targetDir}\\.agents\\skills`, { recursive: true });
-        mkdirSync(`${targetDir}\\.agents\\specs`, { recursive: true });
-        mkdirSync(`${targetDir}\\.agents\\plans`, { recursive: true });
-        mkdirSync(`${targetDir}\\.agents\\research`, { recursive: true });
+        if (!agents) {
+          const result = await selectAgents();
+          if (result === EXIT) return;
+          if (result === BACK) {
+            const quit = await confirmPrompt("Quit codewiser?");
+            if (quit === EXIT) return;
+            if (quit === BACK) break;
+            if (quit) return;
+            break;
+          }
+          agents = result;
+        }
 
-        if (agents.claude) mkdirSync(`${targetDir}\\.claude`, { recursive: true });
-        if (agents.cursor) mkdirSync(`${targetDir}\\.cursor`, { recursive: true });
-        if (agents.antigravity) mkdirSync(`${targetDir}\\.antigravity`, { recursive: true });
-        if (agents.kilo) mkdirSync(`${targetDir}\\.kilo`, { recursive: true });
-
-        success("Directories created");
         current = "mode";
         break;
       }
@@ -127,7 +129,7 @@ export async function init(targetDirInput: string): Promise<void> {
               info("Skills:");
               for (const s of skillDirs.sort()) item(s);
             }
-            current = "download";
+            current = "confirm";
             break;
           }
 
@@ -146,7 +148,7 @@ export async function init(targetDirInput: string): Promise<void> {
               info("Skills:");
               for (const s of skillDirs) item(s);
             }
-            current = "download";
+            current = "confirm";
             break;
           }
 
@@ -154,7 +156,7 @@ export async function init(targetDirInput: string): Promise<void> {
             for (const [path, val] of Object.entries(format.files)) {
               remoteFiles[path] = typeof val === "string" ? val : "0.0.0";
             }
-            current = "download";
+            current = "confirm";
             break;
           }
 
@@ -165,83 +167,98 @@ export async function init(targetDirInput: string): Promise<void> {
         break;
       }
 
-      case "download": {
-        const manifestUrl = `${RAW_BASE}/.agents/manifest.json`;
-        const localManifestPath = `${targetDir}\\.agents\\manifest.json`;
-
-        const nav = await pick("Navigate:", [
-          { value: "continue", label: "Continue with download" },
-          { value: "back", label: "← Back to mode selection" },
-          { value: "quit", label: "Quit" },
-        ]);
-        if (nav === EXIT) return;
-        if (nav === "quit") return;
-        if (nav === "back") { current = "mode"; break; }
-
-        let downloaded = 0;
-        let wentBack = false;
-        for (const [filePath, remoteVer] of Object.entries(remoteFiles)) {
-          const localPath = filePath.replace(/\//g, "\\");
-          const dest = `${targetDir}\\${localPath}`;
-          const url = `${RAW_BASE}/${filePath}`;
-
-          if (!existsSync(dest)) {
-            const ok = await download(url, dest);
-            if (ok) { downloaded++; fileStatus(filePath, "new"); }
-            else warn(`Failed: ${filePath}`);
-          } else if (filePath.endsWith("/SKILL.md")) {
-            const localVer = getManifestVersion(localManifestPath, filePath) ?? "0.0.0";
-            if (versionLt(localVer, remoteVer)) {
-              const overwrite = await confirmOverwrite(filePath, localVer, remoteVer);
-              if (overwrite === EXIT) return;
-              if (overwrite === BACK) { current = "mode"; wentBack = true; break; }
-              if (overwrite) {
-                const ok = await download(url, dest);
-                if (ok) { downloaded++; fileStatus(filePath, "updated"); }
-                else warn(`Failed: ${filePath}`);
-              }
-            } else {
-              fileStatus(filePath, "current");
-            }
-          } else {
-            fileStatus(filePath, "current");
-          }
+      case "confirm": {
+        const agentNamesList = agents ? agentNames(agents) : [];
+        info(`Agents: ${agentNamesList.join(", ") || "None"}`);
+        info(`Mode: ${selectedMode || "None"}`);
+        if (skillDirs.length > 0) {
+          info("Skills:");
+          for (const s of skillDirs.sort()) item(s);
         }
 
-        if (wentBack) break;
+        const choice = await pick("Create project with these selections?", [
+          { value: "create", label: "Yes, create everything!" },
+          { value: "back-agents", label: "← Back to agents" },
+          { value: "back-mode", label: "← Back to mode" },
+          { value: "quit", label: "Quit" },
+        ]);
 
-        if (downloaded > 0) success(`${downloaded} file(s) downloaded`);
-        else info("All files up to date");
+        if (choice === EXIT || choice === "quit") return;
+        if (choice === "back-agents") { current = "agents"; break; }
+        if (choice === "back-mode") { current = "mode"; break; }
 
-        await download(manifestUrl, localManifestPath);
-
-        current = "configs";
-        break;
-      }
-
-      case "configs": {
-        generateOpenCodeConfig(targetDir, skillDirs, agents?.opencode ?? false);
-        generateClaudeMD(targetDir, agents?.claude ?? false);
-        generateAntigravityConfig(targetDir, agents?.antigravity ?? false);
-        generateKiloConfig(targetDir, skillDirs, agents?.kilo ?? false);
-        addExecutionProtocolToAgentsMD(targetDir, selectedMode);
-
-        success("Configurations generated");
-        current = "symlinks";
+        current = "done";
         break;
       }
     }
-
   }
 
-  stepHeader(5, "Create Symlinks");
+  // Phase 2: Execute (all file operations)
+  info("Creating directories...");
+  mkdirSync(`${targetDir}\\.agents\\skills`, { recursive: true });
+  mkdirSync(`${targetDir}\\.agents\\specs`, { recursive: true });
+  mkdirSync(`${targetDir}\\.agents\\plans`, { recursive: true });
+  mkdirSync(`${targetDir}\\.agents\\research`, { recursive: true });
 
+  if (agents?.claude) mkdirSync(`${targetDir}\\.claude`, { recursive: true });
+  if (agents?.cursor) mkdirSync(`${targetDir}\\.cursor`, { recursive: true });
+  if (agents?.antigravity) mkdirSync(`${targetDir}\\.antigravity`, { recursive: true });
+  if (agents?.kilo) mkdirSync(`${targetDir}\\.kilo`, { recursive: true });
+
+  success("Directories created");
+
+  stepHeader(4, "Download Files");
+  const manifestUrl = `${RAW_BASE}/.agents/manifest.json`;
+  const localManifestPath = `${targetDir}\\.agents\\manifest.json`;
+
+  let downloaded = 0;
+  for (const [filePath, remoteVer] of Object.entries(remoteFiles)) {
+    const localPath = filePath.replace(/\//g, "\\");
+    const dest = `${targetDir}\\${localPath}`;
+    const url = `${RAW_BASE}/${filePath}`;
+
+    if (!existsSync(dest)) {
+      const ok = await download(url, dest);
+      if (ok) { downloaded++; fileStatus(filePath, "new"); }
+      else warn(`Failed: ${filePath}`);
+    } else if (filePath.endsWith("/SKILL.md")) {
+      const localVer = getManifestVersion(localManifestPath, filePath) ?? "0.0.0";
+      if (versionLt(localVer, remoteVer)) {
+        const overwrite = await confirmOverwrite(filePath, localVer, remoteVer);
+        if (overwrite === EXIT) return;
+        if (overwrite) {
+          const ok = await download(url, dest);
+          if (ok) { downloaded++; fileStatus(filePath, "updated"); }
+          else warn(`Failed: ${filePath}`);
+        }
+      } else {
+        fileStatus(filePath, "current");
+      }
+    } else {
+      fileStatus(filePath, "current");
+    }
+  }
+
+  if (downloaded > 0) success(`${downloaded} file(s) downloaded`);
+  else info("All files up to date");
+
+  await download(manifestUrl, localManifestPath);
+
+  stepHeader(5, "Generate Configs");
+  generateOpenCodeConfig(targetDir, skillDirs, agents?.opencode ?? false);
+  generateClaudeMD(targetDir, agents?.claude ?? false);
+  generateAntigravityConfig(targetDir, agents?.antigravity ?? false);
+  generateKiloConfig(targetDir, skillDirs, agents?.kilo ?? false);
+  addExecutionProtocolToAgentsMD(targetDir, selectedMode);
+  success("Configurations generated");
+
+  stepHeader(6, "Create Symlinks");
   const symlinkConfigs: Array<{ relativeSrc: string; relativeDest: string; label: string }> = [];
   if (agents?.claude) {
-    symlinkConfigs.push({ relativeSrc: ".claude\\skills", relativeDest: "..\\.agents\\skills", label: "Claude Code" });
+    symlinkConfigs.push({ relativeSrc: ".claude\\skills", relativeDest: ".agents\\skills", label: "Claude Code" });
   }
   if (agents?.cursor) {
-    symlinkConfigs.push({ relativeSrc: ".cursor\\skills", relativeDest: "..\\.agents\\skills", label: "Cursor" });
+    symlinkConfigs.push({ relativeSrc: ".cursor\\skills", relativeDest: ".agents\\skills", label: "Cursor" });
   }
 
   if (symlinkConfigs.length > 0) {
@@ -252,6 +269,51 @@ export async function init(targetDirInput: string): Promise<void> {
   }
 
   showDone(targetDir);
+}
+
+function detectInstalledAgents(targetDir: string): SelectedAgents | null {
+  const detected: SelectedAgents = {
+    opencode: false,
+    claude: false,
+    cursor: false,
+    antigravity: false,
+    kilo: false,
+  };
+
+  let found = false;
+
+  if (existsSync(join(targetDir, "opencode.json"))) {
+    detected.opencode = true;
+    found = true;
+  }
+  if (existsSync(join(targetDir, "CLAUDE.md"))) {
+    detected.claude = true;
+    found = true;
+  }
+  if (existsSync(join(targetDir, ".cursor"))) {
+    detected.cursor = true;
+    found = true;
+  }
+  if (existsSync(join(targetDir, ".antigravity"))) {
+    detected.antigravity = true;
+    found = true;
+  }
+  if (existsSync(join(targetDir, ".kilo"))) {
+    detected.kilo = true;
+    found = true;
+  }
+
+  return found ? detected : null;
+}
+
+function agentNames(agents: SelectedAgents): string[] {
+  const names: string[] = [];
+  if (agents.opencode) names.push("OpenCode");
+  if (agents.claude) names.push("Claude Code");
+  if (agents.cursor) names.push("Cursor");
+  if (agents.antigravity) names.push("Antigravity");
+  if (agents.kilo) names.push("Kilo Code");
+  return names;
 }
 
 function extractSkillDirs(files: Record<string, string>): string[] {

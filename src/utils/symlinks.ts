@@ -47,7 +47,7 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
       spawnSync("powershell.exe", [
         "-NoProfile",
         "-Command",
-        `New-Item -ItemType SymbolicLink -Path '${srcPath}' -Target '${destPath}' -Force`,
+        `Start-Process -Verb RunAs -Wait powershell.exe -ArgumentList '-NoProfile','-Command','& {New-Item -ItemType SymbolicLink -Path ''${srcPath}'' -Target ''${destPath}'' -Force}'`,
       ], { stdio: "inherit" });
     }
 
