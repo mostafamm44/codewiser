@@ -25,7 +25,6 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
       if (stat.isSymbolicLink()) {
         unlinkSync(srcPath);
       } else {
-        copyDirContents(srcPath, destPath);
         rmSync(srcPath, { recursive: true, force: true });
       }
     } catch {

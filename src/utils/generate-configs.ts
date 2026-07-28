@@ -4,7 +4,6 @@ import { join } from "path";
 export function generateOpenCodeConfig(targetDir: string, skillDirs: string[], useOpencode: boolean): void {
   if (!useOpencode) return;
   const dest = join(targetDir, "opencode.json");
-  if (existsSync(dest)) return;
 
   const config: Record<string, unknown> = {
     $schema: "https://opencode.ai/config.json",
@@ -24,7 +23,6 @@ export function generateOpenCodeConfig(targetDir: string, skillDirs: string[], u
 export function generateClaudeMD(targetDir: string, useClaude: boolean): void {
   if (!useClaude) return;
   const dest = join(targetDir, "CLAUDE.md");
-  if (existsSync(dest)) return;
 
   writeFileSync(
     dest,
@@ -43,7 +41,6 @@ export function generateAntigravityConfig(targetDir: string, useAntigravity: boo
   if (!useAntigravity) return;
   const dir = join(targetDir, ".antigravity");
   const dest = join(dir, "workflows.json");
-  if (existsSync(dest)) return;
 
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -65,7 +62,6 @@ export function generateKiloConfig(targetDir: string, skillDirs: string[], useKi
   if (!useKilo) return;
   const dir = join(targetDir, ".kilo");
   const dest = join(dir, "config.json");
-  if (existsSync(dest)) return;
 
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -98,14 +94,37 @@ export function addExecutionProtocolToAgentsMD(targetDir: string, selectedMode: 
   const content = readFileSync(dest, "utf-8");
   if (content.includes(protocolHeader)) return;
 
-  const protocolSection = `
+  const lines = content.split("\n");
+  const result: string[] = [];
+  let skipping = false;
 
-${protocolHeader}
+  for (const line of lines) {
+    const isProtoHeader = line.startsWith("## ") && line.includes("Execution Protocol");
 
-All file modifications or code generation tasks in this project MUST follow the
-${modeTitle} lifecycle defined below. The bootstrap skill will complete this
-section with the full protocol after initial project analysis.
+    if (!skipping && isProtoHeader) {
+      skipping = true;
+      continue;
+    }
 
-`;
-  appendFileSync(dest, protocolSection, "utf-8");
+    if (skipping) {
+      if (isProtoHeader) continue;
+      if (line.startsWith("## ")) {
+        skipping = false;
+        result.push(line);
+        continue;
+      }
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  const cleaned = result.join("\n").trimEnd();
+  const protocolBody = `${protocolHeader}\n\nAll file modifications or code generation tasks in this project MUST follow the\n${modeTitle} lifecycle defined below. The bootstrap skill will complete this\nsection with the full protocol after initial project analysis.\n`;
+
+  if (cleaned !== content.trimEnd()) {
+    writeFileSync(dest, cleaned + "\n\n" + protocolBody, "utf-8");
+  } else {
+    appendFileSync(dest, "\n\n" + protocolBody, "utf-8");
+  }
 }
