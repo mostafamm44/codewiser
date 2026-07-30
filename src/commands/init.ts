@@ -8,7 +8,6 @@ import { download } from "../utils/download";
 import { selectAgents, selectMode, selectWorkflows, confirmOverwrite } from "../utils/prompts";
 import {
   versionLt,
-  getManifestVersion,
   flattenModeFiles,
   flattenWorkflowFiles,
   detectManifestFormat,
@@ -21,11 +20,10 @@ import {
   addExecutionProtocolToAgentsMD,
 } from "../utils/generate-configs";
 import { createAllSymlinks } from "../utils/symlinks";
+import { readConfig, writeConfig, resolveRepo, resolveBranch, buildRawBase } from "../utils/config";
 import type { SelectedAgents } from "../utils/prompts";
 
-const RAW_BASE = "https://raw.githubusercontent.com/yallma3/codewiser/main";
-
-export async function init(targetDirInput: string): Promise<void> {
+export async function init(targetDirInput: string, cliRepo?: string, cliBranch?: string): Promise<void> {
   showTitle();
 
   const targetDir = resolve(targetDirInput);
@@ -33,6 +31,11 @@ export async function init(targetDirInput: string): Promise<void> {
     mkdirSync(targetDir, { recursive: true });
   }
   info(`Setting up codewiser in ${targetDir}`);
+
+  const existingConfig = readConfig(targetDir);
+  const repo = resolveRepo(cliRepo, existingConfig?.repo);
+  const branch = resolveBranch(cliBranch, existingConfig?.branch);
+  const RAW_BASE = buildRawBase(repo, branch);
 
   let agents: SelectedAgents | null = null;
   let selectedMode = "";
@@ -96,7 +99,7 @@ export async function init(targetDirInput: string): Promise<void> {
 
       case "mode": {
         if (!cachedManifest) {
-          const manifestUrl = `${RAW_BASE}/.agents/manifest.json`;
+          const manifestUrl = `${RAW_BASE}/codewiser.json`;
           const result = await runSpinner("Fetching manifest...", async () => {
             const res = await fetch(manifestUrl);
             if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to download manifest`);
@@ -208,8 +211,6 @@ export async function init(targetDirInput: string): Promise<void> {
   success("Directories created");
 
   stepHeader(4, "Download Files");
-  const manifestUrl = `${RAW_BASE}/.agents/manifest.json`;
-  const localManifestPath = `${targetDir}\\.agents\\manifest.json`;
 
   let downloaded = 0;
   for (const [filePath, remoteVer] of Object.entries(remoteFiles)) {
@@ -222,7 +223,7 @@ export async function init(targetDirInput: string): Promise<void> {
       if (ok) { downloaded++; fileStatus(filePath, "new"); }
       else warn(`Failed: ${filePath}`);
     } else if (filePath.endsWith("/SKILL.md")) {
-      const localVer = getManifestVersion(localManifestPath, filePath) ?? "0.0.0";
+      const localVer = existingConfig?.files?.[filePath] ?? "0.0.0";
       if (versionLt(localVer, remoteVer)) {
         const overwrite = await confirmOverwrite(filePath, localVer, remoteVer);
         if (overwrite === EXIT) return;
@@ -242,7 +243,11 @@ export async function init(targetDirInput: string): Promise<void> {
   if (downloaded > 0) success(`${downloaded} file(s) downloaded`);
   else info("All files up to date");
 
-  await download(manifestUrl, localManifestPath);
+  const fileVersions: Record<string, string> = {};
+  for (const [filePath, ver] of Object.entries(remoteFiles)) {
+    fileVersions[filePath] = ver;
+  }
+  writeConfig(targetDir, { repo, branch, files: fileVersions });
 
   stepHeader(5, "Generate Configs");
   generateOpenCodeConfig(targetDir, skillDirs, agents?.opencode ?? false);

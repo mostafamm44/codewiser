@@ -87,7 +87,7 @@ The exact workflow depends on the selected mode (Prototype, Spec Driven, or Rigi
 
 ## Adding a New Skill
 
-Skills are shared across all agents. Create a file at `.agents/skills/<skill-name>/SKILL.md` with instructions for what the skill does. Then add it to the relevant workflow stage's `files` section in `manifest.json` with an initial version. The setup script symlinks this directory into each agent's private config so every agent can load it.
+Skills are shared across all agents. Create a file at `.agents/skills/<skill-name>/SKILL.md` with instructions for what the skill does. Then add it to the relevant workflow stage's `files` section in `codewiser.json` with an initial version. The setup script symlinks this directory into each agent's private config so every agent can load it.
 
 Example: the [git-worktrees skill](.agents/skills/shared/git-worktrees/SKILL.md) was added to teach agents how to isolate feature work using branches and worktrees during concurrent multi-agent development.
 
@@ -100,8 +100,8 @@ Example: the [git-worktrees skill](.agents/skills/shared/git-worktrees/SKILL.md)
 
 ```bash
 # Clone and install
-git clone https://github.com/yallma3/codewiser-cli.git
-cd codewiser-cli
+git clone https://github.com/yallma3/codewiser.git
+cd codewiser
 bun install
 
 # Link globally (optional)
@@ -116,7 +116,7 @@ codewiser my-project
 
 ## How the CLI Works
 
-The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interactive prompts and [meow](https://github.com/sindresorhus/meow) for CLI argument parsing. It downloads skills and specs from the [codewiser](https://github.com/yallma3/codewiser) repository based on a `manifest.json` that tracks artifact versions organized by development modes.
+The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interactive prompts and [meow](https://github.com/sindresorhus/meow) for CLI argument parsing. It downloads skills and specs from the [codewiser](https://github.com/yallma3/codewiser) repository based on a `codewiser.json` that tracks artifact versions organized by development modes.
 
 ### Architecture
 

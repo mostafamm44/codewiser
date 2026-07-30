@@ -1,5 +1,3 @@
-import { readFileSync, existsSync } from "fs";
-
 export function versionLt(v1: string, v2: string): boolean {
   const p1 = v1.split(".").map(Number);
   const p2 = v2.split(".").map(Number);
@@ -19,36 +17,6 @@ export function extractVersion(value: unknown): string {
     return String((value as Record<string, string>).version);
   }
   return "0.0.0";
-}
-
-export function getManifestVersion(manifestPath: string, filePath: string): string | null {
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const obj = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
-    const modes = obj.modes as Record<string, { files?: Record<string, unknown> }> | undefined;
-    if (modes) {
-      for (const mode of Object.values(modes)) {
-        if (mode.files?.[filePath]) return extractVersion(mode.files[filePath]);
-      }
-      return null;
-    }
-    const workflows = obj.workflows as Record<string, { stages?: Record<string, { files?: Record<string, unknown> }> }> | undefined;
-    if (workflows) {
-      for (const wf of Object.values(workflows)) {
-        if (wf.stages) {
-          for (const stage of Object.values(wf.stages)) {
-            if (stage.files?.[filePath]) return extractVersion(stage.files[filePath]);
-          }
-        }
-      }
-      return null;
-    }
-    const files = obj.files as Record<string, unknown> | undefined;
-    if (files?.[filePath]) return extractVersion(files[filePath]);
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 export type ModeEntry = { description?: string; files?: Record<string, unknown> };

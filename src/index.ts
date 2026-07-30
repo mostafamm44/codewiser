@@ -8,12 +8,17 @@ const cli = meow(
     $ codewiser <project-directory>
 
   Options
-    --help            Show this help
-    --version         Show version
+    --repo <owner/repo>   GitHub repository to sync from (default: yallma3/codewiser)
+    --branch <name>       Git branch to use (default: main)
+    --help                Show this help
+    --version             Show version
 `,
   {
     importMeta: import.meta,
-    flags: {},
+    flags: {
+      repo: { type: "string" },
+      branch: { type: "string" },
+    },
   },
 );
 
@@ -27,4 +32,4 @@ if (!name) {
 
 const targetDir = resolve(process.cwd(), "..", name);
 
-await init(targetDir);
+await init(targetDir, cli.flags.repo, cli.flags.branch);

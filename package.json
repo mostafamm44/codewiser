@@ -1,5 +1,5 @@
 {
-  "name": "codewiser-cli",
+  "name": "codewiser",
   "bin": {
     "codewiser": "src/index.ts"
   },
