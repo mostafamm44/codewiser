@@ -7,8 +7,8 @@ export interface CodewiserConfig {
   files?: Record<string, string>;
 }
 
-const DEFAULT_REPO = "yallma3/codewiser";
-const DEFAULT_BRANCH = "main";
+const DEFAULT_REPO ="mostafamm44/codewiser";
+const DEFAULT_BRANCH = "add/codewiser.json";
 
 export function readConfig(targetDir: string): CodewiserConfig | null {
   const configPath = join(targetDir, ".codewiser.json");
