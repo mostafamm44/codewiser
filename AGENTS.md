@@ -2,7 +2,11 @@
 
 Global instructions and behavioral constraints live in this file.
 Project-specific scripts, technology choices, and setup instructions are documented in `README.md`.
+   
 
+
+
+   new repo 
 ## Core Directives
 - `.agents/skills/` — What the agents can do (Commands/Capabilities).
 - `.agents/specs/` — What the agents are building (System & Product Architecture).
