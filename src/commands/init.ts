@@ -36,6 +36,7 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   const repo = resolveRepo(cliRepo, existingConfig?.repo);
   const branch = resolveBranch(cliBranch, existingConfig?.branch);
   const RAW_BASE = buildRawBase(repo, branch);
+  info(`Repo: ${repo} (branch: ${branch})`);
 
   let agents: SelectedAgents | null = null;
   let selectedMode = "";

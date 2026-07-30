@@ -8,8 +8,8 @@ const cli = meow(
     $ codewiser <project-directory>
 
   Options
-    --repo <owner/repo>   GitHub repository to sync from (default: yallma3/codewiser)
-    --branch <name>       Git branch to use (default: main)
+    --repo <owner/repo>   GitHub repository to sync from (default: auto-detect from git remote)
+    --branch <name>       Git branch to use (default: auto-detect from current branch)
     --help                Show this help
     --version             Show version
 `,
