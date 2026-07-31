@@ -8,11 +8,17 @@ export interface CodewiserConfig {
   files?: Record<string, string>;
 }
 
-const DEFAULT_REPO ="mostafamm44/codewiser";
-const DEFAULT_BRANCH = "add/codewiser.json";
+export const DEFAULT_REPO = "mostafamm44/codewiser";
+export const DEFAULT_BRANCH = "add/codewiser.json";
+
+export const CONFIG_FILENAME = ".codewiser.json";
+
+export function getConfigPath(targetDir: string): string {
+  return join(targetDir, CONFIG_FILENAME);
+}
 
 export function readConfig(targetDir: string): CodewiserConfig | null {
-  const configPath = join(targetDir, ".codewiser.json");
+  const configPath = getConfigPath(targetDir);
   if (!existsSync(configPath)) return null;
   try {
     return JSON.parse(readFileSync(configPath, "utf-8")) as CodewiserConfig;
@@ -22,59 +28,67 @@ export function readConfig(targetDir: string): CodewiserConfig | null {
 }
 
 export function writeConfig(targetDir: string, config: CodewiserConfig): void {
-  const configPath = join(targetDir, ".codewiser.json");
+  const configPath = getConfigPath(targetDir);
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
 }
 
-export function resolveRepo(cliRepo?: string, configRepo?: string): string {
+export function resolveRepo(dir: string, cliRepo?: string, configRepo?: string): string {
   if (cliRepo) return cliRepo;
   if (configRepo) return configRepo;
-  const gitRepo = detectGitRemote();
-  return gitRepo || DEFAULT_REPO;
+  return detectGitRemote(dir) || DEFAULT_REPO;
 }
 
-export function resolveBranch(cliBranch?: string, configBranch?: string): string {
+export function resolveBranch(dir: string, cliBranch?: string, configBranch?: string): string {
   if (cliBranch) return cliBranch;
   if (configBranch) return configBranch;
-  const gitBranch = detectGitBranch();
-  return gitBranch || DEFAULT_BRANCH;
+  return detectGitBranch(dir) || DEFAULT_BRANCH;
 }
 
 export function buildRawBase(repo: string, branch: string): string {
   return `https://raw.githubusercontent.com/${repo}/${branch}`;
 }
 
-const GIT_URL_PATTERNS = [
-  /github\.com[/:](.+?)(?:\.git)?$/,
-  /git@github\.com:(.+?)(?:\.git)?$/,
-];
+export function validateRepoFormat(repo: string): boolean {
+  return /^[\w.-]+\/[\w.-]+$/.test(repo);
+}
 
-function detectGitRemote(): string | null {
+export function parseGitUrl(url: string): string | null {
+  for (const pattern of GIT_URL_PATTERNS) {
+    const m = url.match(pattern);
+    if (m && m[1]) return m[1];
+  }
+  return null;
+}
+
+function detectGitRemote(dir: string): string | null {
   try {
     const url = execSync("git remote get-url origin", {
+      cwd: dir,
       encoding: "utf-8",
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    for (const pattern of GIT_URL_PATTERNS) {
-      const m = url.match(pattern);
-      if (m) return m[1] ?? null;
-    }
-    return null;
+    return parseGitUrl(url);
   } catch {
     return null;
   }
 }
 
-function detectGitBranch(): string | null {
+function detectGitBranch(dir: string): string | null {
   try {
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+    const branch = execSync("git symbolic-ref --short HEAD", {
+      cwd: dir,
       encoding: "utf-8",
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    return branch === "HEAD" ? null : branch;
+    return branch || null;
   } catch {
     return null;
   }
 }
+
+const GIT_URL_PATTERNS = [
+  /github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/,
+  /git@github\.com:([\w.-]+\/[\w.-]+?)(?:\.git)?$/,
+];

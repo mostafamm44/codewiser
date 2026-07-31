@@ -65,6 +65,23 @@ The CLI guides you through an interactive session:
 
 Use `← Back` options to navigate between steps. Press `Esc` at any time to exit.
 
+## Managing the Source Repo
+
+Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. By default it auto-detects the repo from your project's git remote and falls back to the bundled default (`mostafamm44/codewiser`).
+
+```bash
+# Show the current repo/branch a project will sync from
+codewiser repo my-project
+
+# Point a project at a different repo/branch (persisted in .codewiser.json)
+codewiser repo my-project owner/repo --branch main
+
+# Reset back to the auto-detected defaults
+codewiser repo my-project --reset
+```
+
+`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. The resolved value is written to `<project>/.codewiser.json`.
+
 ## Supported Agents
 
 | Agent | Config File | Integration |
@@ -120,12 +137,14 @@ The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interacti
 
 ### Architecture
 
-- `src/index.ts` — Entry point, parses CLI arguments, resolves target directory
+- `src/index.ts` — Entry point, parses CLI arguments, resolves target directory, dispatches subcommands
 - `src/commands/init.ts` — State machine orchestrating the 5-step setup process
+- `src/commands/repo.ts` — `repo` subcommand: view/set/reset the source repo in `.codewiser.json`
 - `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
 - `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
 - `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
 - `src/utils/manifest.ts` — Manifest parsing, version comparison, file flattening
+- `src/utils/config.ts` — `.codewiser.json` read/write, repo/branch resolution, git auto-detection
 - `src/utils/generate-configs.ts` — Agent config file generation
 - `src/utils/symlinks.ts` — Symlink creation with admin retry and copy fallback
 

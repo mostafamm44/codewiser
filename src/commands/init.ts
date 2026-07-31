@@ -33,8 +33,8 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   info(`Setting up codewiser in ${targetDir}`);
 
   const existingConfig = readConfig(targetDir);
-  const repo = resolveRepo(cliRepo, existingConfig?.repo);
-  const branch = resolveBranch(cliBranch, existingConfig?.branch);
+  const repo = resolveRepo(targetDir, cliRepo, existingConfig?.repo);
+  const branch = resolveBranch(targetDir, cliBranch, existingConfig?.branch);
   const RAW_BASE = buildRawBase(repo, branch);
   info(`Repo: ${repo} (branch: ${branch})`);
 
@@ -103,12 +103,17 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
           const manifestUrl = `${RAW_BASE}/codewiser.json`;
           const result = await runSpinner("Fetching manifest...", async () => {
             const res = await fetch(manifestUrl);
-            if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to download manifest`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${manifestUrl} is not reachable`);
             const data = (await res.json()) as Record<string, unknown>;
             cachedManifest = data;
             return data;
           });
-          if (result === BACK) { current = "agents"; break; }
+          if (result === BACK) {
+            error(`Could not load codewiser.json from ${RAW_BASE}`);
+            info("Check the repo/branch, then retry.");
+            info("To switch repo/branch: codewiser repo <project> <owner/repo> [--branch <name>]");
+            return;
+          }
           cachedManifest = result;
         }
 

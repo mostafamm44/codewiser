@@ -6,7 +6,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun src/index.ts"
+    "start": "bun src/index.ts",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest"
