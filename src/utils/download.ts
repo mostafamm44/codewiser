@@ -6,6 +6,7 @@ export async function download(url: string, dest: string): Promise<boolean> {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
+  
   try {
     const res = await fetch(url);
     if (!res.ok) return false;
