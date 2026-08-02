@@ -1,4 +1,4 @@
-import { pick, pickMany, confirmPrompt, BACK, EXIT } from "./ui";
+import { pick, pickMany, confirmPrompt, textPrompt, BACK, EXIT } from "./ui";
 
 export interface SelectedAgents {
   opencode: boolean;
@@ -74,4 +74,25 @@ export async function confirmOverwrite(
   remoteVer: string,
 ): Promise<boolean | typeof BACK | typeof EXIT> {
   return confirmPrompt(`Overwrite ${path} (${localVer} -> ${remoteVer})?`);
+}
+
+export async function selectBranch(): Promise<string | typeof EXIT> {
+  const choice = await pick("Which branch should codewiser sync from?", [
+    { value: "main", label: "main", hint: "(default)" },
+    { value: "__custom", label: "Type a custom branch name..." },
+    { value: "__cancel", label: "Cancel" },
+  ]);
+  if (choice === EXIT || choice === "__cancel") return EXIT;
+
+  let branch: string = choice;
+  if (choice === "__custom") {
+    const custom = await textPrompt({ message: "Branch name:", placeholder: "e.g. feature/x" });
+    if (custom === EXIT) return EXIT;
+    branch = custom.trim();
+    if (!branch) return EXIT;
+  }
+
+  const ok = await confirmPrompt(`Sync from branch "${branch}"?`);
+  if (ok === EXIT || !ok) return EXIT;
+  return branch;
 }

@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { error, info, success } from "../utils/ui";
-import { validateRepoFormat, DEFAULT_BRANCH, resolveRepo, resolveBranch, describeRepoSource, describeBranchSource } from "../utils/config";
+import { error, info, success, EXIT } from "../utils/ui";
+import { validateRepoFormat, resolveRepo, resolveBranch, describeRepoSource, describeBranchSource } from "../utils/config";
+import { selectBranch } from "../utils/prompts";
 
 export const MANIFEST_FILENAME = "codewiser.json";
 
@@ -45,7 +46,7 @@ export function repoGet(dir: string = process.cwd()): void {
   if (!manifest.repo && !manifest.branch) info("(no overrides set; run 'codewiser repo set <owner/repo> --branch <name>' to pin the source)");
 }
 
-export function repoSet(repo: string, branch?: string, dir: string = process.cwd()): void {
+export async function repoSet(repo: string, branch?: string, dir: string = process.cwd()): Promise<void> {
   if (!validateRepoFormat(repo)) {
     error(`Invalid repo format: "${repo}". Expected <owner>/<repo> (e.g. yallma3/codewiser).`);
     process.exitCode = 1;
@@ -58,11 +59,19 @@ export function repoSet(repo: string, branch?: string, dir: string = process.cwd
     process.exitCode = 1;
     return;
   }
+  if (!branch) {
+    const selected = await selectBranch();
+    if (selected === EXIT) {
+      process.exitCode = 1;
+      return;
+    }
+    branch = selected;
+  }
   const prevRepo = manifest.repo;
   manifest.repo = repo;
-  if (branch) manifest.branch = branch;
+  manifest.branch = branch;
   writeManifest(dir, manifest);
-  success(`repo set to ${repo} (branch: ${manifest.branch ?? DEFAULT_BRANCH})`);
+  success(`repo set to ${repo} (branch: ${branch})`);
   info(`updated ${getManifestPath(dir)}`);
   if (prevRepo && prevRepo !== repo) info(`was: ${prevRepo}`);
 }

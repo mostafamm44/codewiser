@@ -1,4 +1,4 @@
-import { select, multiselect, confirm, isCancel, spinner } from "@clack/prompts";
+import { select, multiselect, confirm, isCancel, spinner, text } from "@clack/prompts";
 import pc from "picocolors";
 
 export const BACK = "back";
@@ -91,6 +91,16 @@ export async function confirmPrompt(message: string): Promise<boolean | typeof B
   });
   if (isCancel(result)) return EXIT;
   return result as boolean;
+}
+
+export async function textPrompt(opts: { message: string; placeholder?: string; initialValue?: string }): Promise<string | typeof EXIT> {
+  const result = await text({
+    message: opts.message,
+    placeholder: opts.placeholder,
+    initialValue: opts.initialValue,
+  });
+  if (isCancel(result)) return EXIT;
+  return result;
 }
 
 export async function runSpinner<T>(label: string, fn: () => Promise<T>): Promise<T | typeof BACK> {

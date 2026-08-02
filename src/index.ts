@@ -36,7 +36,7 @@ if (first === "repo") {
       console.error(cli.help);
       process.exit(1);
     }
-    repoSet(third, cli.flags.branch);
+    await repoSet(third, cli.flags.branch);
   } else if (action === "reset") {
     repoReset();
   } else if (action === "get") {
