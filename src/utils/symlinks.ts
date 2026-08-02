@@ -61,8 +61,11 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
     if (result) {
       if (process.platform !== "win32") return;
       const { spawnSync } = await import("child_process");
-      const script = "param([string]$src,[string]$dest); $inner = 'param([string]$p,[string]$t) New-Item -ItemType SymbolicLink -Path $p -Target $t -Force'; $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner)); Start-Process -Verb RunAs -Wait -FilePath powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand',$enc,'\"' + $src + '\"','\"' + $dest + '\"')";
-      spawnSync("powershell.exe", ["-NoProfile", "-Command", script, srcPath, destPath], { stdio: "inherit" });
+      const psQuote = (s: string): string => "'" + s.replace(/'/g, "''") + "'";
+      const inner = `New-Item -ItemType SymbolicLink -Path ${psQuote(srcPath)} -Target ${psQuote(destPath)} -Force`;
+      const enc = Buffer.from(inner, "utf16le").toString("base64");
+      const script = `Start-Process -Verb RunAs -Wait -FilePath powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand','${enc}')`;
+      spawnSync("powershell.exe", ["-NoProfile", "-Command", script], { stdio: "inherit" });
     }
 
     if (!existsSync(srcPath) || !lstatSync(srcPath).isSymbolicLink()) {
