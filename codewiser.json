@@ -1,6 +1,6 @@
 {
   "$schema": "codewiser.json",
-  "description": "Version manifest for downloadable framework artifacts. Organized by modes. Used by codewiser CLI to detect and prompt for updates.",
+  "description": " here is the test branch Version manifest for downloadable framework artifacts. Organized by modes. Used by codewiser CLI to detect and prompt for updates.",
   "version": "3.0.0",
   "modes": {
     "prototype": {
