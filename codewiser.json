@@ -2,8 +2,6 @@
   "$schema": "codewiser.json",
   "description": "Version manifest for downloadable framework artifacts. Organized by modes. Used by codewiser CLI to detect and prompt for updates.",
   "version": "3.0.0",
-  "repo": "mostafamm44/codewiser",
-  "branch": "add/codewiser.json",
   "modes": {
     "prototype": {
       "description": "Rapid prototyping — BRD, UX design, then code. No formal planning or test requirements.",

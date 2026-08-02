@@ -20,7 +20,8 @@ import {
   addExecutionProtocolToAgentsMD,
 } from "../utils/generate-configs";
 import { createAllSymlinks } from "../utils/symlinks";
-import { readConfig, writeConfig, resolveRepo, resolveBranch, buildRawBase } from "../utils/config";
+import { readConfig, writeConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource } from "../utils/config";
+import { readManifest } from "./repo";
 import type { SelectedAgents } from "../utils/prompts";
 
 export async function init(targetDirInput: string, cliRepo?: string, cliBranch?: string): Promise<void> {
@@ -33,10 +34,12 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   info(`Setting up codewiser in ${targetDir}`);
 
   const existingConfig = readConfig(targetDir);
-  const repo = resolveRepo(targetDir, cliRepo, existingConfig?.repo);
-  const branch = resolveBranch(targetDir, cliBranch, existingConfig?.branch);
-  const RAW_BASE = buildRawBase(repo, branch);
+  const localManifest = readManifest(process.cwd());
+  let repo = resolveRepo(targetDir, cliRepo, localManifest?.repo);
+  let branch = resolveBranch(targetDir, cliBranch, localManifest?.branch);
+  let RAW_BASE = buildRawBase(repo, branch);
   info(`Repo: ${repo} (branch: ${branch})`);
+  info(`  from ${describeRepoSource(targetDir, cliRepo, localManifest?.repo)} / ${describeBranchSource(targetDir, cliBranch, localManifest?.branch)}`);
 
   let agents: SelectedAgents | null = null;
   let selectedMode = "";
@@ -110,11 +113,21 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
           });
           if (result === BACK) {
             error(`Could not load codewiser.json from ${RAW_BASE}`);
+            info(`Resolved from ${describeRepoSource(targetDir, cliRepo, localManifest?.repo)} / ${describeBranchSource(targetDir, cliBranch, localManifest?.branch)}`);
             info("Check the repo/branch, then retry.");
-            info("To switch repo/branch: codewiser repo <project> <owner/repo> [--branch <name>]");
+            info("To switch repo/branch: codewiser repo set <owner/repo> --branch <name>");
             return;
           }
           cachedManifest = result;
+
+          const manifestRepo = typeof cachedManifest.repo === "string" ? cachedManifest.repo : undefined;
+          const manifestBranch = typeof cachedManifest.branch === "string" ? cachedManifest.branch : undefined;
+          if (manifestRepo && manifestBranch) {
+            repo = manifestRepo;
+            branch = manifestBranch;
+            RAW_BASE = buildRawBase(repo, branch);
+            info(`Manifest sources files from ${repo}@${branch}`);
+          }
         }
 
         const format = detectManifestFormat(cachedManifest);
@@ -253,7 +266,7 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   for (const [filePath, ver] of Object.entries(remoteFiles)) {
     fileVersions[filePath] = ver;
   }
-  writeConfig(targetDir, { repo, branch, files: fileVersions });
+  writeConfig(targetDir, { files: fileVersions });
 
   stepHeader(5, "Generate Configs");
   generateOpenCodeConfig(targetDir, skillDirs, agents?.opencode ?? false);

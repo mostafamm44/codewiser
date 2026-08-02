@@ -67,20 +67,22 @@ Use `← Back` options to navigate between steps. Press `Esc` at any time to exi
 
 ## Managing the Source Repo
 
-Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. By default it auto-detects the repo from your project's git remote and falls back to the bundled default (`mostafamm44/codewiser`).
+Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. The manifest declares its own `repo` and `branch`; when present, the CLI uses them for all file downloads. Otherwise it auto-detects the repo from your project's git remote and falls back to the bundled default (`mostafamm44/codewiser`).
+
+From the root of a project that has a `codewiser.json`:
 
 ```bash
-# Show the current repo/branch a project will sync from
-codewiser repo my-project
+# Show the repo/branch the manifest declares (or the defaults)
+codewiser repo
 
-# Point a project at a different repo/branch (persisted in .codewiser.json)
-codewiser repo my-project owner/repo --branch main
+# Point the manifest at a different repo/branch
+codewiser repo set owner/repo --branch main
 
-# Reset back to the auto-detected defaults
-codewiser repo my-project --reset
+# Remove the overrides so the built-in defaults apply
+codewiser repo reset
 ```
 
-`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. The resolved value is written to `<project>/.codewiser.json`.
+`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. Repo/branch resolution order is: CLI flag → `./codewiser.json` in the current directory (what `codewiser repo set` edits) → project's git remote/branch → bundled default. `<project>/.codewiser.json` only tracks downloaded file versions (for re-run comparisons); it never overrides the manifest.
 
 ## Supported Agents
 
@@ -139,7 +141,7 @@ The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interacti
 
 - `src/index.ts` — Entry point, parses CLI arguments, resolves target directory, dispatches subcommands
 - `src/commands/init.ts` — State machine orchestrating the 5-step setup process
-- `src/commands/repo.ts` — `repo` subcommand: view/set/reset the source repo in `.codewiser.json`
+- `src/commands/repo.ts` — `repo` subcommand: get/set/reset `repo`/`branch` in the manifest
 - `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
 - `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
 - `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
