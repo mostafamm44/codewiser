@@ -32,7 +32,7 @@ if (first === "repo") {
   const action = second ?? "get";
   if (action === "set") {
     if (!third) {
-      console.error("error: <owner/repo> is required (e.g. codewiser repo set mostafamm44/codewiser)");
+      console.error("error: <owner/repo> is required (e.g. codewiser repo set yallma3/codewiser)");
       console.error(cli.help);
       process.exit(1);
     }

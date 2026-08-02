@@ -47,7 +47,7 @@ export function repoGet(dir: string = process.cwd()): void {
 
 export function repoSet(repo: string, branch?: string, dir: string = process.cwd()): void {
   if (!validateRepoFormat(repo)) {
-    error(`Invalid repo format: "${repo}". Expected <owner>/<repo> (e.g. mostafamm44/codewiser).`);
+    error(`Invalid repo format: "${repo}". Expected <owner>/<repo> (e.g. yallma3/codewiser).`);
     process.exitCode = 1;
     return;
   }
