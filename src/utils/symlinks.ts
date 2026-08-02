@@ -1,7 +1,8 @@
-import { existsSync, lstatSync, symlinkSync, unlinkSync, rmSync, mkdirSync, readdirSync } from "fs";
+import { existsSync, lstatSync, symlinkSync, unlinkSync, rmSync, cpSync } from "fs";
 import { join } from "path";
 import { confirm } from "@clack/prompts";
 import { isCancel, cancel } from "@clack/prompts";
+import { error, warn } from "./ui";
 
 interface SymlinkConfig {
   relativeSrc: string;
@@ -25,10 +26,23 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
       if (stat.isSymbolicLink()) {
         unlinkSync(srcPath);
       } else {
+        const remove = await confirm({
+          message: `Replace existing directory ${srcPath} with a symlink?`,
+          initialValue: false,
+        });
+        if (isCancel(remove)) {
+          cancel("Cancelled");
+          return;
+        }
+        if (!remove) {
+          warn(`Preserved existing directory ${srcPath}`);
+          return;
+        }
         rmSync(srcPath, { recursive: true, force: true });
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      error(`Failed to prepare ${srcPath}: ${String(e)}`);
+      return;
     }
   }
 
@@ -39,15 +53,16 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
       message: `Symlink failed for ${cfg.label}. Retry as admin?`,
       initialValue: false,
     });
-    if (isCancel(result)) cancel("Cancelled");
+    if (isCancel(result)) {
+      cancel("Cancelled");
+      return;
+    }
 
     if (result) {
+      if (process.platform !== "win32") return;
       const { spawnSync } = await import("child_process");
-      spawnSync("powershell.exe", [
-        "-NoProfile",
-        "-Command",
-        `Start-Process -Verb RunAs -Wait powershell.exe -ArgumentList '-NoProfile','-Command','& {New-Item -ItemType SymbolicLink -Path ''${srcPath}'' -Target ''${destPath}'' -Force}'`,
-      ], { stdio: "inherit" });
+      const script = "param([string]$src,[string]$dest); $inner = 'param([string]$p,[string]$t) New-Item -ItemType SymbolicLink -Path $p -Target $t -Force'; $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner)); Start-Process -Verb RunAs -Wait -FilePath powershell.exe -ArgumentList @('-NoProfile','-EncodedCommand',$enc,'\"' + $src + '\"','\"' + $dest + '\"')";
+      spawnSync("powershell.exe", ["-NoProfile", "-Command", script, srcPath, destPath], { stdio: "inherit" });
     }
 
     if (!existsSync(srcPath) || !lstatSync(srcPath).isSymbolicLink()) {
@@ -58,16 +73,5 @@ async function handleSymlink(targetDir: string, cfg: SymlinkConfig): Promise<voi
 
 function copyDirContents(src: string, dest: string): void {
   if (!existsSync(src)) return;
-  mkdirSync(dest, { recursive: true });
-  const entries = readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const s = join(src, entry.name);
-    const d = join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyDirContents(s, d);
-    } else {
-      const content = Bun.file(s);
-      Bun.write(d, content);
-    }
-  }
+  cpSync(src, dest, { recursive: true, force: true });
 }

@@ -112,7 +112,7 @@ Example: the [git-worktrees skill](.agents/skills/shared/git-worktrees/SKILL.md)
 
 ## Requirements
 
-- **Bun** (recommended) or **Node.js 18+**
+- **Bun** (recommended) or **Node.js 20.12+**
 - Git
 
 ## Development

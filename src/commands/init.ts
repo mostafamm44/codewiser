@@ -105,11 +105,9 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
         if (!cachedManifest) {
           const manifestUrl = `${RAW_BASE}/codewiser.json`;
           const result = await runSpinner("Fetching manifest...", async () => {
-            const res = await fetch(manifestUrl);
+            const res = await fetch(manifestUrl, { signal: AbortSignal.timeout(10000) });
             if (!res.ok) throw new Error(`HTTP ${res.status}: ${manifestUrl} is not reachable`);
-            const data = (await res.json()) as Record<string, unknown>;
-            cachedManifest = data;
-            return data;
+            return (await res.json()) as Record<string, unknown>;
           });
           if (result === BACK) {
             error(`Could not load codewiser.json from ${RAW_BASE}`);
@@ -217,15 +215,15 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
 
   // Phase 2: Execute (all file operations)
   info("Creating directories...");
-  mkdirSync(`${targetDir}\\.agents\\skills`, { recursive: true });
-  mkdirSync(`${targetDir}\\.agents\\specs`, { recursive: true });
-  mkdirSync(`${targetDir}\\.agents\\plans`, { recursive: true });
-  mkdirSync(`${targetDir}\\.agents\\research`, { recursive: true });
+  mkdirSync(join(targetDir, ".agents", "skills"), { recursive: true });
+  mkdirSync(join(targetDir, ".agents", "specs"), { recursive: true });
+  mkdirSync(join(targetDir, ".agents", "plans"), { recursive: true });
+  mkdirSync(join(targetDir, ".agents", "research"), { recursive: true });
 
-  if (agents?.claude) mkdirSync(`${targetDir}\\.claude`, { recursive: true });
-  if (agents?.cursor) mkdirSync(`${targetDir}\\.cursor`, { recursive: true });
-  if (agents?.antigravity) mkdirSync(`${targetDir}\\.antigravity`, { recursive: true });
-  if (agents?.kilo) mkdirSync(`${targetDir}\\.kilo`, { recursive: true });
+  if (agents?.claude) mkdirSync(join(targetDir, ".claude"), { recursive: true });
+  if (agents?.cursor) mkdirSync(join(targetDir, ".cursor"), { recursive: true });
+  if (agents?.antigravity) mkdirSync(join(targetDir, ".antigravity"), { recursive: true });
+  if (agents?.kilo) mkdirSync(join(targetDir, ".kilo"), { recursive: true });
 
   success("Directories created");
 
@@ -233,8 +231,7 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
 
   let downloaded = 0;
   for (const [filePath, remoteVer] of Object.entries(remoteFiles)) {
-    const localPath = filePath.replace(/\//g, "\\");
-    const dest = `${targetDir}\\${localPath}`;
+    const dest = join(targetDir, ...filePath.split("/"));
     const url = `${RAW_BASE}/${filePath}`;
 
     if (!existsSync(dest)) {
@@ -279,10 +276,10 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   stepHeader(6, "Create Symlinks");
   const symlinkConfigs: Array<{ relativeSrc: string; relativeDest: string; label: string }> = [];
   if (agents?.claude) {
-    symlinkConfigs.push({ relativeSrc: ".claude\\skills", relativeDest: ".agents\\skills", label: "Claude Code" });
+    symlinkConfigs.push({ relativeSrc: join(".claude", "skills"), relativeDest: join(".agents", "skills"), label: "Claude Code" });
   }
   if (agents?.cursor) {
-    symlinkConfigs.push({ relativeSrc: ".cursor\\skills", relativeDest: ".agents\\skills", label: "Cursor" });
+    symlinkConfigs.push({ relativeSrc: join(".cursor", "skills"), relativeDest: join(".agents", "skills"), label: "Cursor" });
   }
 
   if (symlinkConfigs.length > 0) {

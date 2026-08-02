@@ -4,7 +4,7 @@
     "codewiser": "src/index.ts"
   },
   "type": "module",
-  "private": true,
+  "version": "0.1.2",
   "scripts": {
     "start": "bun src/index.ts",
     "test": "bun test"

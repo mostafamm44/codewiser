@@ -110,7 +110,6 @@ export async function runSpinner<T>(label: string, fn: () => Promise<T>): Promis
     const result = await fn();
     return result;
   } catch (e) {
-    s.stop(label);
     error(String(e));
     return BACK;
   } finally {
