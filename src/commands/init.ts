@@ -35,11 +35,11 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
 
   const existingConfig = readConfig(targetDir);
   const localManifest = readManifest(process.cwd());
-  let repo = resolveRepo(targetDir, cliRepo, localManifest?.repo);
-  let branch = resolveBranch(targetDir, cliBranch, localManifest?.branch);
+  let repo = resolveRepo(process.cwd(), cliRepo, localManifest?.repo);
+  let branch = resolveBranch(process.cwd(), cliBranch, localManifest?.branch);
   let RAW_BASE = buildRawBase(repo, branch);
   info(`Repo: ${repo} (branch: ${branch})`);
-  info(`  from ${describeRepoSource(targetDir, cliRepo, localManifest?.repo)} / ${describeBranchSource(targetDir, cliBranch, localManifest?.branch)}`);
+  info(`  from ${describeRepoSource(process.cwd(), cliRepo, localManifest?.repo)} / ${describeBranchSource(process.cwd(), cliBranch, localManifest?.branch)}`);
 
   let agents: SelectedAgents | null = null;
   let selectedMode = "";
@@ -113,7 +113,7 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
           });
           if (result === BACK) {
             error(`Could not load codewiser.json from ${RAW_BASE}`);
-            info(`Resolved from ${describeRepoSource(targetDir, cliRepo, localManifest?.repo)} / ${describeBranchSource(targetDir, cliBranch, localManifest?.branch)}`);
+            info(`Resolved from ${describeRepoSource(process.cwd(), cliRepo, localManifest?.repo)} / ${describeBranchSource(process.cwd(), cliBranch, localManifest?.branch)}`);
             info("Check the repo/branch, then retry.");
             info("To switch repo/branch: codewiser repo set <owner/repo> --branch <name>");
             return;
