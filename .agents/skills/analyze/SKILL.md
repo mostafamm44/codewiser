@@ -1,6 +1,6 @@
 ---
 name: analyze
-description: Guidelines for reverse engineering a codebase to document how a specific functionality works — its architecture, contracts, interfaces, data flow, and component interactions. Use when updating the project specs, debugging a complex feature, or producing a system reference for future planning for new Module or Feature.
+description: this is testing  Guidelines for reverse engineering a codebase to document how a specific functionality works — its architecture, contracts, interfaces, data flow, and component interactions. Use when updating the project specs, debugging a complex feature, or producing a system reference for future planning for new Module or Feature.
 license: MIT
 ---
 
