@@ -7,13 +7,14 @@ const cli = meow(
   `
   Usage
     $ codewiser <project-directory>
-    $ codewiser repo                       Show the repo/branch in ./codewiser.json
+    $ codewiser repo                       Show the effective repo/branch config
     $ codewiser repo set <owner/repo>      Set the repo in ./codewiser.json [--branch <name>]
     $ codewiser repo reset                 Remove repo/branch overrides from ./codewiser.json
 
   Options
-    --repo <owner/repo>   GitHub repository to sync from (default: auto-detect from git remote)
-    --branch <name>       Git branch to use (default: auto-detect from current branch)
+    --repo <owner/repo>   GitHub repository to sync from (default: project, then user profile, then built-in)
+    --branch <name>       Git branch to use (default: project, then user profile, then built-in)
+    -g, --global          Apply to your user profile (~/.codewiser.json) instead of ./codewiser.json
     --help                Show this help
     --version             Show version
 `,
@@ -22,6 +23,7 @@ const cli = meow(
     flags: {
       repo: { type: "string" },
       branch: { type: "string" },
+      global: { type: "boolean", shortFlag: "g" },
     },
   },
 );
@@ -36,9 +38,9 @@ if (first === "repo") {
       console.error(cli.help);
       process.exit(1);
     }
-    await repoSet(third, cli.flags.branch);
+    await repoSet(third, cli.flags.branch, process.cwd(), cli.flags.global);
   } else if (action === "reset") {
-    repoReset();
+    repoReset(process.cwd(), cli.flags.global);
   } else if (action === "get") {
     repoGet();
   } else {

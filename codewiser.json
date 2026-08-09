@@ -143,5 +143,7 @@
         ".agents/specs/spec-index.json": "1.0.0"
       }
     }
-  }
+  },
+  "repo": "proejctsetuprepo/codewiser",
+  "branch": "main"
 }

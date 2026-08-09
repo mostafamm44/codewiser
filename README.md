@@ -67,12 +67,12 @@ Use `← Back` options to navigate between steps. Press `Esc` at any time to exi
 
 ## Managing the Source Repo
 
-Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. The manifest declares its own `repo` and `branch`; when present, the CLI uses them for all file downloads. Otherwise it auto-detects the repo from your project's git remote and falls back to the bundled default (`yallma3/codewiser`).
+Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. The manifest declares its own `repo` and `branch`; when present, the CLI uses them for all file downloads. Otherwise it falls back to your user-profile `~/.codewiser.json` (if set) and finally to the bundled default (`yallma3/codewiser`).
 
 From the root of a project that has a `codewiser.json`:
 
 ```bash
-# Show the repo/branch the manifest declares (or the defaults)
+# Show the effective repo/branch and which source each value comes from
 codewiser repo
 
 # Point the manifest at a different repo/branch
@@ -80,9 +80,13 @@ codewiser repo set owner/repo --branch main
 
 # Remove the overrides so the built-in defaults apply
 codewiser repo reset
+
+# Set a machine-wide (user profile) default instead of ./codewiser.json
+codewiser repo set owner/repo --branch main -g
+codewiser repo reset -g            # clear the user-wide default
 ```
 
-`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. Repo/branch resolution order is: CLI flag → `./codewiser.json` in the current directory (what `codewiser repo set` edits) → project's git remote/branch → bundled default. `<project>/.codewiser.json` only tracks downloaded file versions (for re-run comparisons); it never overrides the manifest.
+`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. Repo/branch resolution order is: CLI flag → `./codewiser.json` in the current directory (what `codewiser repo set` edits) → `~/.codewiser.json` in your user profile (what `codewiser repo set -g` edits) → bundled default (`yallma3/codewiser` @ `main`). `<project>/.codewiser.json` only tracks downloaded file versions (for re-run comparisons); it never overrides the manifest.
 
 ## Supported Agents
 
@@ -141,12 +145,12 @@ The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interacti
 
 - `src/index.ts` — Entry point, parses CLI arguments, resolves target directory, dispatches subcommands
 - `src/commands/init.ts` — State machine orchestrating the 5-step setup process
-- `src/commands/repo.ts` — `repo` subcommand: get/set/reset `repo`/`branch` in the manifest
+- `src/commands/repo.ts` — `repo` subcommand: get/set/reset `repo`/`branch` in the manifest or user-profile (`-g`)
 - `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
 - `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
 - `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
 - `src/utils/manifest.ts` — Manifest parsing, version comparison, file flattening
-- `src/utils/config.ts` — `.codewiser.json` read/write, repo/branch resolution, git auto-detection
+- `src/utils/config.ts` — `.codewiser.json` / `~/.codewiser.json` read/write, repo/branch resolution
 - `src/utils/generate-configs.ts` — Agent config file generation
 - `src/utils/symlinks.ts` — Symlink creation with admin retry and copy fallback
 
