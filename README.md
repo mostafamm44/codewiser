@@ -67,7 +67,7 @@ Use `← Back` options to navigate between steps. Press `Esc` at any time to exi
 
 ## Managing the Source Repo
 
-Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. The manifest declares its own `repo` and `branch`; when present, the CLI uses them for all file downloads. Otherwise it falls back to your user-profile `~/.codewiser.json` (if set) and finally to the bundled default (`yallma3/codewiser`).
+Codewiser syncs skills and specs from a GitHub repo's `codewiser.json` manifest. The source repo/branch is resolved from three tiers only: the project's `./codewiser.json` (if it sets `repo`/`branch`), then your user-profile `~/.codewiser.json` (if set), and finally the bundled default (`yallma3/codewiser` @ `main`). The fetched manifest's own `repo`/`branch` fields are informational and never override the effective source.
 
 From the root of a project that has a `codewiser.json`:
 

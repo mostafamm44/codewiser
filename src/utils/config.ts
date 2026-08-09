@@ -22,10 +22,27 @@ export function getGlobalConfigPath(): string {
   return join(homedir(), CONFIG_FILENAME);
 }
 
+function parseConfig(raw: unknown): CodewiserConfig | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const candidate = raw as Record<string, unknown>;
+  const config: CodewiserConfig = {};
+  if (typeof candidate.repo === "string") config.repo = candidate.repo;
+  if (typeof candidate.branch === "string") config.branch = candidate.branch;
+  const files = candidate.files;
+  if (typeof files === "object" && files !== null && !Array.isArray(files)) {
+    const fileVersions: Record<string, string> = {};
+    for (const [name, version] of Object.entries(files as Record<string, unknown>)) {
+      if (typeof version === "string") fileVersions[name] = version;
+    }
+    config.files = fileVersions;
+  }
+  return config;
+}
+
 function readConfigFromPath(path: string): CodewiserConfig | null {
   if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, "utf-8")) as CodewiserConfig;
+    return parseConfig(JSON.parse(readFileSync(path, "utf-8")));
   } catch {
     return null;
   }

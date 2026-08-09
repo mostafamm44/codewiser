@@ -36,9 +36,9 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   const existingConfig = readConfig(targetDir);
   const localManifest = readManifest(process.cwd());
   const globalConfig = readGlobalConfig();
-  let repo = resolveRepo(process.cwd(), cliRepo, localManifest?.repo, globalConfig?.repo);
-  let branch = resolveBranch(process.cwd(), cliBranch, localManifest?.branch, globalConfig?.branch);
-  let RAW_BASE = buildRawBase(repo, branch);
+  const repo = resolveRepo(process.cwd(), cliRepo, localManifest?.repo, globalConfig?.repo);
+  const branch = resolveBranch(process.cwd(), cliBranch, localManifest?.branch, globalConfig?.branch);
+  const RAW_BASE = buildRawBase(repo, branch);
   info(`Repo: ${repo} (branch: ${branch})`);
   info(`  from ${describeRepoSource(process.cwd(), cliRepo, localManifest?.repo, globalConfig?.repo)} / ${describeBranchSource(process.cwd(), cliBranch, localManifest?.branch, globalConfig?.branch)}`);
 
@@ -118,15 +118,6 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
             return;
           }
           cachedManifest = result;
-
-          const manifestRepo = typeof cachedManifest.repo === "string" ? cachedManifest.repo : undefined;
-          const manifestBranch = typeof cachedManifest.branch === "string" ? cachedManifest.branch : undefined;
-          if (manifestRepo && manifestBranch) {
-            repo = manifestRepo;
-            branch = manifestBranch;
-            RAW_BASE = buildRawBase(repo, branch);
-            info(`Manifest sources files from ${repo}@${branch}`);
-          }
         }
 
         const format = detectManifestFormat(cachedManifest);
