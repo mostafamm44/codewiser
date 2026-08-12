@@ -70,3 +70,33 @@ export function detectManifestFormat(obj: Record<string, unknown>): ManifestForm
   if (obj.files) return { type: "files", files: obj.files as Record<string, unknown> };
   return { type: "unknown" };
 }
+
+// Flatten the file/version map of a single named mode.
+export function flattenModeByName(raw: Record<string, unknown>, modeName: string): Record<string, string> {
+  const modes = raw.modes;
+  if (modes && typeof modes === "object") {
+    const mode = (modes as Record<string, ModeEntry>)[modeName];
+    if (mode) return flattenModeFiles(mode);
+  }
+  return {};
+}
+
+// Union of all mode file/version maps. When versions repeat across modes the
+// highest one wins, so a pull against the full manifest surfaces every artifact.
+export function flattenAllModeFiles(raw: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  const modes = raw.modes;
+  if (modes && typeof modes === "object") {
+    for (const entry of Object.values(modes as Record<string, ModeEntry>)) {
+      if (!entry || typeof entry !== "object") continue;
+      const files = (entry as ModeEntry).files;
+      if (!files) continue;
+      for (const [path, val] of Object.entries(files)) {
+        const v = extractVersion(val);
+        const prev = result[path];
+        if (!prev || versionLt(prev, v)) result[path] = v;
+      }
+    }
+  }
+  return result;
+}

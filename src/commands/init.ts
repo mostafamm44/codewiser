@@ -4,7 +4,6 @@ import {
   showTitle, showDone, stepHeader, info, warn, error, success, item, fileStatus, runSpinner, pick, confirmPrompt,
   BACK, EXIT,
 } from "../utils/ui";
-import { download } from "../utils/download";
 import { selectAgents, selectMode, selectWorkflows, confirmOverwrite } from "../utils/prompts";
 import {
   versionLt,
@@ -20,7 +19,8 @@ import {
   addExecutionProtocolToAgentsMD,
 } from "../utils/generate-configs";
 import { createAllSymlinks } from "../utils/symlinks";
-import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource } from "../utils/config";
+import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource, normalizeFileVersions } from "../utils/config";
+import { syncFiles, type SyncOutcome } from "../utils/sync-files";
 import { readManifest } from "./repo";
 import type { SelectedAgents } from "../utils/prompts";
 
@@ -221,41 +221,66 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
 
   stepHeader(4, "Download Files");
 
-  let downloaded = 0;
-  for (const [filePath, remoteVer] of Object.entries(remoteFiles)) {
-    const dest = join(targetDir, ...filePath.split("/"));
-    const url = `${RAW_BASE}/${filePath}`;
+  const abort = new Error("init aborted");
+  const localFiles = normalizeFileVersions(existingConfig?.files);
 
-    if (!existsSync(dest)) {
-      const ok = await download(url, dest);
-      if (ok) { downloaded++; fileStatus(filePath, "new"); }
-      else warn(`Failed: ${filePath}`);
-    } else if (filePath.endsWith("/SKILL.md")) {
-      const localVer = existingConfig?.files?.[filePath] ?? "0.0.0";
-      if (versionLt(localVer, remoteVer)) {
-        const overwrite = await confirmOverwrite(filePath, localVer, remoteVer);
-        if (overwrite === EXIT) return;
-        if (overwrite) {
-          const ok = await download(url, dest);
-          if (ok) { downloaded++; fileStatus(filePath, "updated"); }
-          else warn(`Failed: ${filePath}`);
+  let outcome: SyncOutcome;
+  try {
+    outcome = await syncFiles({
+      targetDir,
+      rawBase: RAW_BASE,
+      remoteFiles,
+      localFiles,
+      callbacks: {
+        async onNew(paths) { return paths; },
+        async onUpdate(paths) {
+          const accepted: string[] = [];
+          for (const path of paths) {
+            if (!path.endsWith("/SKILL.md")) continue;
+            const remoteVer = remoteFiles[path] ?? "0.0.0";
+            const localVer = localFiles[path]?.version ?? "0.0.0";
+            if (!versionLt(localVer, remoteVer)) continue;
+            const overwrite = await confirmOverwrite(path, localVer, remoteVer);
+            if (overwrite === EXIT) throw abort;
+            if (overwrite) accepted.push(path);
+          }
+          return accepted;
+        },
+        async onUpdateDirty() { return []; },
+      },
+    });
+  } catch (e) {
+    if (e === abort) return;
+    throw e;
+  }
+
+  for (const p of outcome.downloadedNew) fileStatus(p, "new");
+  for (const p of outcome.downloadedUpdates) fileStatus(p, "updated");
+  for (const p of outcome.keptDirty) warn(`Modified locally, kept: ${p}`);
+  for (const p of outcome.conflicts) warn(`Modified locally with a newer version upstream: ${p}`);
+  for (const p of outcome.upToDate) fileStatus(p, "current");
+
+  if (outcome.downloadedNew.length + outcome.downloadedUpdates.length > 0) {
+    success(`${outcome.downloadedNew.length + outcome.downloadedUpdates.length} file(s) downloaded`);
+  } else {
+    info("All files up to date");
+  }
+
+  writeConfig(targetDir, {
+    repo,
+    branch,
+    mode: selectedMode || undefined,
+    agents: agents
+      ? {
+          opencode: agents.opencode,
+          claude: agents.claude,
+          cursor: agents.cursor,
+          antigravity: agents.antigravity,
+          kilo: agents.kilo,
         }
-      } else {
-        fileStatus(filePath, "current");
-      }
-    } else {
-      fileStatus(filePath, "current");
-    }
-  }
-
-  if (downloaded > 0) success(`${downloaded} file(s) downloaded`);
-  else info("All files up to date");
-
-  const fileVersions: Record<string, string> = {};
-  for (const [filePath, ver] of Object.entries(remoteFiles)) {
-    fileVersions[filePath] = ver;
-  }
-  writeConfig(targetDir, { files: fileVersions });
+      : undefined,
+    files: outcome.files,
+  });
 
   stepHeader(5, "Generate Configs");
   generateOpenCodeConfig(targetDir, skillDirs, agents?.opencode ?? false);

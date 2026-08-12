@@ -96,3 +96,33 @@ export async function selectBranch(): Promise<string | typeof EXIT> {
   if (ok === EXIT || !ok) return EXIT;
   return branch;
 }
+
+export async function selectPublishFiles(paths: string[]): Promise<string[] | typeof BACK | typeof EXIT> {
+  const result = await pickMany(
+    "Which modified skills do you want to publish?",
+    paths.map((p) => ({ value: p, label: p })),
+    { required: false },
+  );
+  if (result === EXIT) return EXIT;
+  return result;
+}
+
+export async function enterNewVersion(path: string, current: string): Promise<string | typeof EXIT> {
+  const next = await textPrompt({
+    message: `New version for ${path}:`,
+    placeholder: current,
+    initialValue: current,
+  });
+  if (next === EXIT) return EXIT;
+  const trimmed = next.trim();
+  if (!trimmed) return EXIT;
+  return trimmed;
+}
+
+export async function chooseUpdateOrKeep(path: string, local: string, remote: string): Promise<"update" | "keep" | typeof BACK | typeof EXIT> {
+  const choice = await pick(`"${path}" has a newer version upstream (${local} -> ${remote})`, [
+    { value: "update", label: "Update to latest first" },
+    { value: "keep", label: "Keep my local version" },
+  ]);
+  return choice;
+}

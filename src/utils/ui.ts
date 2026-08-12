@@ -84,10 +84,10 @@ export async function pickMany<T extends string>(
   return result as T[];
 }
 
-export async function confirmPrompt(message: string): Promise<boolean | typeof BACK | typeof EXIT> {
+export async function confirmPrompt(message: string, initialValue?: boolean): Promise<boolean | typeof BACK | typeof EXIT> {
   const result = await confirm({
     message,
-    initialValue: true,
+    initialValue: initialValue ?? true,
   });
   if (isCancel(result)) return EXIT;
   return result as boolean;

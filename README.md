@@ -86,7 +86,31 @@ codewiser repo set owner/repo --branch main -g
 codewiser repo reset -g            # clear the user-wide default
 ```
 
-`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. Repo/branch resolution order is: CLI flag → `./codewiser.json` in the current directory (what `codewiser repo set` edits) → `~/.codewiser.json` in your user profile (what `codewiser repo set -g` edits) → bundled default (`yallma3/codewiser` @ `main`). `<project>/.codewiser.json` only tracks downloaded file versions (for re-run comparisons); it never overrides the manifest.
+`--repo` and `--branch` flags on the main command act as one-off overrides for a single run; they do not persist. Repo/branch resolution order is: CLI flag → `./codewiser.json` in the current directory (what `codewiser repo set` edits) → `~/.codewiser.json` in your user profile (what `codewiser repo set -g` edits) → bundled default (`yallma3/codewiser` @ `main`). A synced project's `./codewiser.json` (the merged manifest) always has `repo`/`branch`, so a project can be pointed at its own fork or a team fork with `codewiser repo set`.
+
+## Team Skill Sync
+
+The core goal of codewiser is letting the whole team share and evolve the same skills. Every synced project keeps a **merged `codewiser.json`** that lists each installed file with its **version and a SHA-256 content hash**. Two-way sync turns that ledger into a collaboration loop:
+
+```bash
+# Pull — fetch skills other members added or bumped upstream
+codewiser pull
+
+# Publish — open a pull request with YOUR locally edited skills
+codewiser publish
+
+# Both, in one interactive pass
+codewiser sync
+```
+
+- **`codewiser pull`** compares the project's tracked versions/hashes against the upstream `codewiser.json`. It lists new files from the team (prompts to install), files with newer versions upstream (prompts to update), and warns about files you edited locally that also have newer upstream versions so you never silently lose your work.
+- **`codewiser publish`** detects locally edited skills by recomputing content hashes and comparing them to the ledger. It:
+
+  1. Checks upstream first — if another member already released a newer version of a skill you edited, it tells you and lets you **update to the latest or keep your version** before proceeding.
+  2. Lets you pick which modified skills to publish and **type a new version for each one** (that's what teammates see on their next `codewiser pull`).
+  3. Opens a pull request to the source repo. It uses the [GitHub CLI](https://cli.github.com) (`gh repo clone`, `git push`, `gh pr create`), falling back to a fork when you don't have write access. It updates the skill versions inside `codewiser.json` as part of the PR.
+
+  After a successful PR your local ledger is updated so the same edits aren't re-detected.
 
 ## Supported Agents
 
@@ -146,11 +170,17 @@ The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interacti
 - `src/index.ts` — Entry point, parses CLI arguments, resolves target directory, dispatches subcommands
 - `src/commands/init.ts` — State machine orchestrating the 5-step setup process
 - `src/commands/repo.ts` — `repo` subcommand: get/set/reset `repo`/`branch` in the manifest or user-profile (`-g`)
+- `src/commands/pull.ts` — `pull` subcommand: sync new/updated skills from the team
+- `src/commands/publish.ts` — `publish` subcommand: open a PR with locally edited skills (via gh CLI)
+- `src/commands/sync.ts` — `sync` subcommand: runs pull then publish
 - `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
 - `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
 - `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
 - `src/utils/manifest.ts` — Manifest parsing, version comparison, file flattening
-- `src/utils/config.ts` — `.codewiser.json` / `~/.codewiser.json` read/write, repo/branch resolution
+- `src/utils/hash.ts` — SHA-256 content hashing for local-edit detection
+- `src/utils/sync-files.ts` — Shared download/compare engine (versions + hashes) used by init and pull
+- `src/utils/remote.ts` — Remote manifest fetch and flattening
+- `src/utils/config.ts` — Merged project `codewiser.json` / `~/.codewiser.json` read/write, repo/branch resolution
 - `src/utils/generate-configs.ts` — Agent config file generation
 - `src/utils/symlinks.ts` — Symlink creation with admin retry and copy fallback
 
