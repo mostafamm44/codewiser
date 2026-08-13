@@ -152,9 +152,24 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
     return;
   }
 
+  // The PR targets the sync branch this project pulls from (so merged updates
+  // reach teammates on their next `codewiser pull`), falling back to the repo's
+  // default branch when the sync branch isn't on the remote.
+  const syncBranchOnRemote = runCmd(
+    "gh",
+    ["api", `repos/${repo}/branches/${encodeURIComponent(branch)}`, "--jq", ".name"],
+  ).ok;
+  const baseBranch = syncBranchOnRemote ? branch : defaultBranch;
+  if (baseBranch !== branch) {
+    warn(`Branch "${branch}" not found on ${repo}; PR will target default branch "${defaultBranch}".`);
+  }
+
   const tmp = mkdtempSync(join(tmpdir(), "codewiser-publish-"));
   try {
-    const clone = runCmd("gh", ["repo", "clone", repo, tmp, "--", "--depth", "1"]);
+    const clone = runCmd("gh", [
+      "repo", "clone", repo, tmp, "--", "--depth", "1",
+      ...(baseBranch === branch ? ["--branch", branch, "--single-branch"] : []),
+    ]);
     if (!clone.ok) {
       error(`Failed to clone ${repo}: ${clone.err}`);
       process.exitCode = 1;
@@ -185,11 +200,21 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
       info("Updated versions in codewiser.json");
     } else {
-      warn("No codewiser.json manifest in the source repo — skill versions were not bumped.");
+      error(`No codewiser.json manifest on ${repo}@${baseBranch} — cannot bump skill versions.`);
+      info("Point this project at a branch that contains the manifest: codewiser repo set <owner/repo> --branch <name>");
+      process.exitCode = 1;
+      return;
     }
 
     const title = buildTitle(selected, versions);
     const body = selected.map((p) => `- \`${p}\` ${localFiles[p]?.version ?? "0.0.0"} -> ${versions.get(p)}`).join("\n");
+
+    const add = runCmd("git", ["add", "-A"], tmp);
+    if (!add.ok) {
+      error(`git add failed: ${add.err}`);
+      process.exitCode = 1;
+      return;
+    }
 
     const gitUser = ["-c", "user.name=codewiser", "-c", `user.email=${login}@users.noreply.github.com`];
     const commit = runCmd("git", [...gitUser, "commit", "-m", title], tmp);
@@ -232,7 +257,7 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
     const pr = runCmd("gh", [
       "pr", "create",
       "--repo", repo,
-      "--base", defaultBranch,
+      "--base", baseBranch,
       "--head", head,
       "--title", title,
       "--body", body,
