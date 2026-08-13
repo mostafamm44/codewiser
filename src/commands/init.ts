@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import {
   showTitle, showDone, stepHeader, info, warn, error, success, item, fileStatus, runSpinner, pick, confirmPrompt,
@@ -21,6 +21,7 @@ import {
 import { createAllSymlinks } from "../utils/symlinks";
 import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource, normalizeFileVersions } from "../utils/config";
 import { syncFiles, type SyncOutcome } from "../utils/sync-files";
+import { writeBase } from "../utils/cache";
 import { readManifest } from "./repo";
 import type { SelectedAgents } from "../utils/prompts";
 
@@ -259,6 +260,14 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   for (const p of outcome.keptDirty) warn(`Modified locally, kept: ${p}`);
   for (const p of outcome.conflicts) warn(`Modified locally with a newer version upstream: ${p}`);
   for (const p of outcome.upToDate) fileStatus(p, "current");
+
+  for (const p of [...outcome.downloadedNew, ...outcome.downloadedUpdates]) {
+    try {
+      writeBase(targetDir, p, readFileSync(join(targetDir, ...p.split("/")), "utf-8"));
+    } catch {
+      // best-effort
+    }
+  }
 
   if (outcome.downloadedNew.length + outcome.downloadedUpdates.length > 0) {
     success(`${outcome.downloadedNew.length + outcome.downloadedUpdates.length} file(s) downloaded`);

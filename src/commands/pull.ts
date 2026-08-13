@@ -3,6 +3,9 @@ import { info, warn, error, success, fileStatus, runSpinner, BACK, EXIT } from "
 import { syncFiles, type SyncOutcome } from "../utils/sync-files";
 import { selectFilesToUpdate } from "../utils/prompts";
 import { fetchManifest, flattenRemoteManifest, MANIFEST_TIMEOUT_MS } from "../utils/remote";
+import { writeBase } from "../utils/cache";
+import { join } from "path";
+import { readFileSync } from "fs";
 
 export async function pull(dir: string = process.cwd()): Promise<void> {
   const config = readConfig(dir);
@@ -83,12 +86,23 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
     },
   });
 
+  // Record the downloaded/resynced content as the merge base for future pulls.
+  for (const p of [...outcome.downloadedNew, ...outcome.downloadedUpdates, ...outcome.resynced]) {
+    const dest = join(dir, ...p.split("/"));
+    try {
+      writeBase(dir, p, readFileSync(dest, "utf-8"));
+    } catch {
+      // best-effort
+    }
+  }
+
   let changed = 0;
   for (const p of outcome.downloadedNew) { fileStatus(p, "new"); changed++; }
   for (const p of outcome.downloadedUpdates) { fileStatus(p, "updated"); changed++; }
   for (const p of outcome.resynced) info(`Already matching the repo — re-baselined (no download): ${p}`);
   for (const p of outcome.keptUpdates) info(`Team updated upstream — you kept your local copy: ${p}`);
   for (const p of outcome.skippedNew) info(`New on the team repo — not installed: ${p}`);
+  for (const p of outcome.localAhead) info(`Your version is ahead of the team repo (PR not merged yet?): ${p}`);
   for (const p of outcome.keptDirty) warn(`Your local change — team's copy unchanged: ${p}`);
   for (const p of outcome.conflicts) warn(`Changed on both sides — you kept your version: ${p}`);
   if (outcome.unverifiedContent.length > 0) {
@@ -102,7 +116,8 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
     success(`${changed} file(s) updated (${outcome.downloadedNew.length} new, ${outcome.downloadedUpdates.length} updated).`);
   } else if (
     outcome.keptUpdates.length + outcome.skippedNew.length +
-    outcome.conflicts.length + outcome.keptDirty.length + outcome.resynced.length > 0
+    outcome.conflicts.length + outcome.keptDirty.length + outcome.resynced.length +
+    outcome.localAhead.length > 0
   ) {
     info("Nothing changed locally — see the lines above for what the team has and what you kept.");
   } else {

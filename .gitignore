@@ -27,6 +27,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# codewiser base-content cache (three-way merge baseline)
+.codewiser-cache/
+
 # IntelliJ based IDEs
 .idea
 

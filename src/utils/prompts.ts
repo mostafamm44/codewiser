@@ -124,6 +124,16 @@ export async function enterNewVersion(path: string, current: string): Promise<st
   return trimmed;
 }
 
+export async function choosePullFirst(path: string): Promise<"merge" | "asIs" | typeof EXIT> {
+  const choice = await pick(`"${path}" was also changed by the team since your last sync.`, [
+    { value: "merge", label: "Pull their changes into my edits and publish (merge)" },
+    { value: "asIs", label: "Just publish my edits as-is" },
+    { value: "__cancel", label: "Cancel and run 'codewiser pull' first" },
+  ]);
+  if (choice === EXIT || choice === BACK || choice === "__cancel") return EXIT;
+  return choice;
+}
+
 export async function chooseUpdateOrKeep(path: string, local: string, remote: string): Promise<"update" | "keep" | typeof BACK | typeof EXIT> {
   const choice = await pick(`"${path}" has a newer version upstream (${local} -> ${remote})`, [
     { value: "update", label: "Update to latest first" },

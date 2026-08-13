@@ -4,11 +4,12 @@ import { join } from "path";
 import { execFileSync } from "child_process";
 import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, normalizeFileVersions } from "../utils/config";
 import { info, warn, error, success, confirmPrompt, EXIT, BACK } from "../utils/ui";
-import { selectPublishFiles, enterNewVersion, chooseUpdateOrKeep } from "../utils/prompts";
+import { selectPublishFiles, enterNewVersion, chooseUpdateOrKeep, choosePullFirst } from "../utils/prompts";
 import { download } from "../utils/download";
 import { versionLt } from "../utils/manifest";
-import { sha256File } from "../utils/hash";
-import { fetchManifest, flattenRemoteManifest } from "../utils/remote";
+import { sha256File, sha256Text } from "../utils/hash";
+import { fetchManifest, flattenRemoteManifest, MANIFEST_TIMEOUT_MS } from "../utils/remote";
+import { readBase, writeBase } from "../utils/cache";
 
 function filePath(dir: string, rel: string): string {
   return join(dir, ...rel.split("/"));
@@ -70,36 +71,73 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
     if (hash !== null && hash !== entry.sha256) dirty.add(path);
   }
 
-  // 2. Check the remote for newer versions of the edited skills. Let the member
-  //    update first (rebasing on the team's latest) or keep their own.
+  // 2. Check the team's copy of each edited skill. If they changed it since our
+  //    last sync, offer to pull their changes into our edits first (a three-way
+  //    merge against the cached base) so we rebase on the team's latest before
+  //    opening a pull request.
   const remote = await fetchManifest(RAW_BASE);
   if (remote) {
     const remoteFiles = flattenRemoteManifest(remote, config.mode);
     for (const path of [...dirty]) {
       const remoteVer = remoteFiles[path];
-      if (!remoteVer) continue;
       const localVer = localFiles[path]?.version ?? "0.0.0";
-      if (!versionLt(localVer, remoteVer)) continue;
-      const choice = await chooseUpdateOrKeep(path, localVer, remoteVer);
-      if (choice === EXIT || choice === BACK) {
+      const fetched = await fetchRemoteContent(RAW_BASE, path);
+      const base = readBase(dir, path);
+      const remoteChanged =
+        (remoteVer !== undefined && versionLt(localVer, remoteVer)) ||
+        (fetched !== null && base !== null && sha256Text(fetched) !== sha256Text(base));
+
+      if (!remoteChanged) continue;
+
+      if (base === null || fetched === null) {
+        // No content baseline cached (or the fetch failed): keep the win-lose
+        // choice, but only when the remote version is genuinely newer.
+        if (remoteVer === undefined || !versionLt(localVer, remoteVer)) continue;
+        const choice = await chooseUpdateOrKeep(path, localVer, remoteVer);
+        if (choice === EXIT || choice === BACK) {
+          process.exitCode = 1;
+          return;
+        }
+        if (choice === "update") {
+          const ok = await download(`${RAW_BASE}/${path}`, filePath(dir, path));
+          if (!ok) {
+            warn(`Failed to update ${path}; continuing with the local version.`);
+            continue;
+          }
+          info(`Updated ${path} to ${remoteVer}`);
+          localFiles[path] = { version: remoteVer, sha256: sha256File(filePath(dir, path)) ?? undefined };
+          writeBase(dir, path, readFileSync(filePath(dir, path), "utf-8"));
+          dirty.delete(path);
+        } else {
+          info(`Keeping local version of ${path}`);
+        }
+        continue;
+      }
+
+      const choice = await choosePullFirst(path);
+      if (choice === EXIT) {
         process.exitCode = 1;
         return;
       }
-      if (choice === "update") {
-        const ok = await download(`${RAW_BASE}/${path}`, filePath(dir, path));
-        if (!ok) {
-          warn(`Failed to update ${path}; continuing with the local version.`);
-          continue;
-        }
-        info(`Updated ${path} to ${remoteVer}`);
-        localFiles[path] = { version: remoteVer, sha256: sha256File(filePath(dir, path)) ?? undefined };
-        dirty.delete(path);
+      if (choice === "asIs") {
+        info(`Publishing local version of ${path} as-is (team's changes left for PR review).`);
+        continue;
+      }
+
+      const result = mergeThreeWay(readFileSync(filePath(dir, path), "utf-8"), base, fetched);
+      writeFileSync(filePath(dir, path), result.merged, "utf-8");
+      if (result.ok) {
+        info(`Merged team changes into ${path}; your edits are kept.`);
       } else {
-        info(`Keeping local version of ${path}`);
+        dirty.delete(path);
+        warn(
+          `Merged ${path} but your edits overlap the team's — conflict markers left in the file. ` +
+          `Resolve them, then run 'codewiser publish' again. Excluded from this PR.`,
+        );
       }
     }
   } else {
-    warn("Could not reach the upstream manifest; cannot check for newer versions.");
+    warn("Could not reach the upstream manifest; cannot check for newer changes.");
   }
 
   if (dirty.size === 0) {
@@ -351,4 +389,39 @@ function buildTitle(paths: string[], versions: Map<string, string>): string {
     return `${name} v${versions.get(p)}`;
   });
   return `skills: ${parts.join(", ")}`;
+}
+
+async function fetchRemoteContent(rawBase: string, path: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${rawBase}/${path}`, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+// Three-way merge of the team's latest content into a locally edited file, using
+// the last-synced content as the common ancestor. Returns the merged text; when
+// `ok` is false the merge hit overlaps and the text contains conflict markers.
+function mergeThreeWay(local: string, base: string, theirs: string): { ok: boolean; merged: string } {
+  const tmp = mkdtempSync(join(tmpdir(), "codewiser-merge-"));
+  try {
+    const mine = join(tmp, "mine");
+    const baseFile = join(tmp, "base");
+    const theirsFile = join(tmp, "theirs");
+    writeFileSync(mine, local, "utf-8");
+    writeFileSync(baseFile, base, "utf-8");
+    writeFileSync(theirsFile, theirs, "utf-8");
+    const r = runCmd("git", ["merge-file", mine, baseFile, theirsFile]);
+    return { ok: r.ok, merged: readFileSync(mine, "utf-8") };
+  } catch {
+    return { ok: false, merged: local };
+  } finally {
+    try {
+      rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  }
 }

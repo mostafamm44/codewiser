@@ -44,6 +44,10 @@ export interface SyncOutcome {
   // pulled in). The change came from the repo, so the baseline is re-adopted
   // with no download or prompt.
   resynced: string[];
+  // Files whose tracked version is ahead of the repo (e.g. a publish PR not yet
+  // merged). The remote is behind, not changed, so they are never offered as
+  // team updates and never downgraded.
+  localAhead: string[];
   upToDate: string[];
   // Paths where the content comparison could not be performed (fetch/hash
   // failure), so a same-version upstream edit may have been missed silently.
@@ -58,6 +62,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   const dirtyUpdateCandidates: string[] = [];
   const keptDirtyCandidates: string[] = [];
   const resyncedCandidates: string[] = [];
+  const localAheadCandidates: string[] = [];
   const upToDateCandidates: string[] = [];
   const unverifiedContentCandidates: string[] = [];
 
@@ -82,7 +87,9 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
       dirty = false;
     }
 
-    const versionNewer = versionLt(localVer, remoteVer);
+    const remoteNewer = versionLt(localVer, remoteVer);
+    const localAhead = versionLt(remoteVer, localVer);
+    const versionEqual = !remoteNewer && !localAhead;
     const baselineHash = storedHash ?? currentHash;
 
     // Fetch the upstream file once and compare it against the tracked baseline,
@@ -95,7 +102,12 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
       else unverifiedContentCandidates.push(path);
     }
 
-    const remoteChanged = versionNewer || (remoteHash !== null && remoteHash !== baselineHash);
+    // A remote change is a strictly newer version, or — only when versions are
+    // equal — different content. When our version is already ahead (e.g. a
+    // publish PR not merged yet) the remote being behind is expected, so it is
+    // never treated as a team update nor a reason to downgrade.
+    const remoteChanged =
+      remoteNewer || (versionEqual && remoteHash !== null && remoteHash !== baselineHash);
     // When the on-disk file already matches the repo, the change came from the
     // repo (or was published): both sides agree, only the baseline is stale.
     const bothAgree = remoteHash !== null && currentHash !== null && remoteHash === currentHash;
@@ -104,11 +116,15 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
       if (remoteChanged) {
         if (bothAgree) resyncedCandidates.push(path);
         else dirtyUpdateCandidates.push(path);
+      } else if (localAhead) {
+        localAheadCandidates.push(path);
       } else {
         keptDirtyCandidates.push(path);
       }
     } else if (remoteChanged) {
       updateCandidates.push(path);
+    } else if (localAhead) {
+      localAheadCandidates.push(path);
     } else {
       upToDateCandidates.push(path);
     }
@@ -181,6 +197,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     keptDirty,
     conflicts,
     resynced: resyncedCandidates,
+    localAhead: localAheadCandidates,
     upToDate: upToDateCandidates,
     unverifiedContent: unverifiedContentCandidates,
   };
