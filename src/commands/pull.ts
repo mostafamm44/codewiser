@@ -86,23 +86,25 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
   let changed = 0;
   for (const p of outcome.downloadedNew) { fileStatus(p, "new"); changed++; }
   for (const p of outcome.downloadedUpdates) { fileStatus(p, "updated"); changed++; }
-  for (const p of outcome.keptDirty) warn(`Local edits kept (not published): ${p}`);
-  for (const p of outcome.conflicts) warn(`Local edits kept over newer upstream version: ${p}`);
-  for (const p of outcome.upToDate) fileStatus(p, "current");
-  for (const p of outcome.keptUpdates) info(`Kept local (not updated): ${p}`);
-  for (const p of outcome.skippedNew) info(`Skipped new file: ${p}`);
-  for (const p of outcome.resynced) info(`Already in sync with the repo (adopted): ${p}`);
+  for (const p of outcome.resynced) info(`Already matching the repo — re-baselined (no download): ${p}`);
+  for (const p of outcome.keptUpdates) info(`Team updated upstream — you kept your local copy: ${p}`);
+  for (const p of outcome.skippedNew) info(`New on the team repo — not installed: ${p}`);
+  for (const p of outcome.keptDirty) warn(`Your local change — team's copy unchanged: ${p}`);
+  for (const p of outcome.conflicts) warn(`Changed on both sides — you kept your version: ${p}`);
   if (outcome.unverifiedContent.length > 0) {
     warn(`Could not verify ${outcome.unverifiedContent.length} file(s) against upstream: ${outcome.unverifiedContent.join(", ")}`);
   }
+  if (outcome.upToDate.length > 0) {
+    info(`${outcome.upToDate.length} file(s) already up to date with the team.`);
+  }
 
   if (changed > 0) {
-    success(`${changed} file(s) updated`);
+    success(`${changed} file(s) updated (${outcome.downloadedNew.length} new, ${outcome.downloadedUpdates.length} updated).`);
   } else if (
     outcome.keptUpdates.length + outcome.skippedNew.length +
     outcome.conflicts.length + outcome.keptDirty.length + outcome.resynced.length > 0
   ) {
-    info("Nothing updated — your local versions were kept.");
+    info("Nothing changed locally — see the lines above for what the team has and what you kept.");
   } else {
     info("Everything is up to date.");
   }
