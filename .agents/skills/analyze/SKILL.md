@@ -8,7 +8,7 @@ license: MIT
 
 ## Purpose
 
-ctest-Reverse engineering documents capture **how a specific functionality actually works** in the current codebase and **keep that understanding in sync** as the system evolves. They serve as the project's living map — answering "how does this feature work from entry to exit?" for both human readers and agents. The analysis is either about a how-it-works or a module.
+Reverse engineering documents capture **how a specific functionality actually works** in the current codebase and **keep that understanding in sync** as the system evolves. They serve as the project's living map — answering "how does this feature work from entry to exit?" for both human readers and agents. The analysis is either about a how-it-works or a module.
 
 ### Unscoped Invocation
 
