@@ -1,7 +1,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { download } from "./download";
-import { sha256File } from "./hash";
+import { sha256File, sha256Text } from "./hash";
 import { versionLt } from "./manifest";
 import type { FileVersion } from "./config";
 
@@ -21,25 +21,39 @@ export interface SyncOptions {
   remoteFiles: Record<string, string>;
   localFiles?: FilesMap;
   callbacks: SyncCallbacks;
+  // When provided, files at the same version are also compared by content hash so
+  // upstream edits that didn't bump the version are still surfaced as updates.
+  contentFetcher?: (path: string) => Promise<string | null>;
 }
 
 export interface SyncOutcome {
   files: FilesMap;
   downloadedNew: string[];
   downloadedUpdates: string[];
+  // Update candidates the caller decided NOT to apply; they stay tracked at
+  // their current version/hash and will be offered again on the next run.
+  keptUpdates: string[];
+  // New files the caller decided NOT to install; left untracked locally.
+  skippedNew: string[];
+  // Files edited locally (dirty) that the caller chose to keep instead of
+  // overwriting with the upstream version.
   keptDirty: string[];
   conflicts: string[];
   upToDate: string[];
+  // Paths where the content comparison could not be performed (fetch/hash
+  // failure), so a same-version upstream edit may have been missed silently.
+  unverifiedContent: string[];
 }
 
 export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
-  const { targetDir, rawBase, remoteFiles, localFiles = {}, callbacks } = opts;
+  const { targetDir, rawBase, remoteFiles, localFiles = {}, callbacks, contentFetcher } = opts;
 
   const newCandidates: string[] = [];
   const updateCandidates: string[] = [];
   const dirtyUpdateCandidates: string[] = [];
   const keptDirtyCandidates: string[] = [];
   const upToDateCandidates: string[] = [];
+  const unverifiedContentCandidates: string[] = [];
 
   for (const [path, remoteVer] of Object.entries(remoteFiles)) {
     const dest = join(targetDir, ...path.split("/"));
@@ -62,10 +76,30 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
       dirty = false;
     }
 
+    const versionNewer = versionLt(localVer, remoteVer);
+
+    // Detect upstream content changes even when the version didn't move. Only
+    // worth fetching when the version alone wouldn't already flag an update.
+    let remoteDiffers = false;
+    if (!versionNewer && contentFetcher) {
+      if (currentHash) {
+        const remoteContent = await contentFetcher(path);
+        if (remoteContent !== null) {
+          remoteDiffers = sha256Text(remoteContent) !== currentHash;
+        } else {
+          unverifiedContentCandidates.push(path);
+        }
+      } else {
+        // Couldn't hash the local file (missing/unreadable): content comparison
+        // is skipped rather than silently risking a missed change.
+        unverifiedContentCandidates.push(path);
+      }
+    }
+
     if (dirty) {
-      if (versionLt(localVer, remoteVer)) dirtyUpdateCandidates.push(path);
+      if (versionNewer || remoteDiffers) dirtyUpdateCandidates.push(path);
       else keptDirtyCandidates.push(path);
-    } else if (versionLt(localVer, remoteVer)) {
+    } else if (versionNewer || remoteDiffers) {
       updateCandidates.push(path);
     } else {
       upToDateCandidates.push(path);
@@ -119,14 +153,21 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   }
 
   const keptDirty = [...keptDirtyCandidates];
-  const conflicts = [...dirtyUpdateCandidates];
+  const skippedNew = [...newCandidates.filter((p) => !downloadedNew.has(p))];
+  // "downloadedUpdates" merges clean updates and overwritten dirty files; since a
+  // path can only ever be one kind of candidate, the filtering is unambiguous.
+  const keptUpdates = [...updateCandidates.filter((p) => !downloadedUpdates.has(p))];
+  const conflicts = [...dirtyUpdateCandidates.filter((p) => !downloadedUpdates.has(p))];
 
   return {
     files,
     downloadedNew: [...downloadedNew],
     downloadedUpdates: [...downloadedUpdates],
+    keptUpdates,
+    skippedNew,
     keptDirty,
     conflicts,
     upToDate: upToDateCandidates,
+    unverifiedContent: unverifiedContentCandidates,
   };
 }

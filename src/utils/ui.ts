@@ -73,12 +73,13 @@ export async function pick<T extends string>(
 export async function pickMany<T extends string>(
   message: string,
   options: Option<T>[],
-  config?: { required?: boolean },
+  config?: { required?: boolean; initialValues?: T[] },
 ): Promise<T[] | typeof BACK | typeof EXIT> {
   const result = await multiselect({
     message,
     options: options as any,
     required: config?.required ?? false,
+    initialValues: config?.initialValues,
   });
   if (isCancel(result)) return EXIT;
   return result as T[];

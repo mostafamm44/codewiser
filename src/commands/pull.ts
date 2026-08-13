@@ -1,7 +1,8 @@
 import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, normalizeFileVersions } from "../utils/config";
-import { info, warn, error, success, fileStatus, runSpinner, confirmPrompt, EXIT } from "../utils/ui";
+import { info, warn, error, success, fileStatus, runSpinner, BACK, EXIT } from "../utils/ui";
 import { syncFiles, type SyncOutcome } from "../utils/sync-files";
-import { fetchManifest, flattenRemoteManifest } from "../utils/remote";
+import { selectFilesToUpdate } from "../utils/prompts";
+import { fetchManifest, flattenRemoteManifest, MANIFEST_TIMEOUT_MS } from "../utils/remote";
 
 export async function pull(dir: string = process.cwd()): Promise<void> {
   const config = readConfig(dir);
@@ -29,39 +30,55 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
   const remoteFiles = flattenRemoteManifest(remote, config.mode);
   const localFiles = normalizeFileVersions(config.files);
 
+  // Compare file content too, so upstream edits that didn't bump the version in
+  // codewiser.json are still detected.
+  const contentFetcher = async (path: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`${RAW_BASE}/${path}`, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
+  };
+
   const outcome: SyncOutcome = await syncFiles({
     targetDir: dir,
     rawBase: RAW_BASE,
     remoteFiles,
     localFiles,
+    contentFetcher,
     callbacks: {
       async onNew(paths) {
         if (paths.length === 0) return [];
-        info(`New files available from the team:`);
-        for (const p of paths) info(`  ${p}`);
-        const ok = await confirmPrompt(`Install ${paths.length} new file(s)?`);
-        if (ok === EXIT || !ok) return [];
-        return paths;
+        const selected = await selectFilesToUpdate(paths, "New files available from the team (select which to install):");
+        if (selected === EXIT || selected === BACK) return [];
+        return selected;
       },
       async onUpdate(paths) {
         if (paths.length === 0) return [];
-        info(`Updated versions available from the team:`);
-        for (const p of paths) {
+        const entries = paths.map((p) => {
           const localVer = localFiles[p]?.version ?? "0.0.0";
           const remoteVer = remoteFiles[p] ?? "0.0.0";
-          info(`  ${p} (${localVer} -> ${remoteVer})`);
-        }
-        const ok = await confirmPrompt(`Update ${paths.length} file(s) to the latest versions?`);
-        if (ok === EXIT || !ok) return [];
-        return paths;
+          const contentChanged = localVer === remoteVer ? " — content changed" : "";
+          return { value: p, label: `${p} (${localVer} -> ${remoteVer})${contentChanged}` };
+        });
+        const selected = await selectFilesToUpdate(entries, "Updates available from the team (select which to pull):");
+        if (selected === EXIT || selected === BACK) return [];
+        return selected;
       },
       async onUpdateDirty(paths) {
         if (paths.length === 0) return [];
-        warn(`You have local edits on files with newer upstream versions:`);
-        for (const p of paths) warn(`  ${p}`);
-        const ok = await confirmPrompt("Publish your edits first (recommended) or overwrite them with the upstream versions?", false);
-        if (ok === true) return paths;
-        return [];
+        const entries = paths.map((p) => ({
+          value: p,
+          label: `${p} (local edits — newer upstream)`,
+        }));
+        const selected = await selectFilesToUpdate(
+          entries,
+          "You edited these locally and they changed upstream. Select the ones to overwrite with the team's version (leave unselected to keep yours):",
+        );
+        if (selected === EXIT || selected === BACK) return [];
+        return selected;
       },
     },
   });
@@ -72,9 +89,22 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
   for (const p of outcome.keptDirty) warn(`Local edits kept (not published): ${p}`);
   for (const p of outcome.conflicts) warn(`Local edits kept over newer upstream version: ${p}`);
   for (const p of outcome.upToDate) fileStatus(p, "current");
+  for (const p of outcome.keptUpdates) info(`Kept local (not updated): ${p}`);
+  for (const p of outcome.skippedNew) info(`Skipped new file: ${p}`);
+  if (outcome.unverifiedContent.length > 0) {
+    warn(`Could not verify ${outcome.unverifiedContent.length} file(s) against upstream: ${outcome.unverifiedContent.join(", ")}`);
+  }
 
-  if (changed > 0) success(`${changed} file(s) updated`);
-  else info("Everything is up to date.");
+  if (changed > 0) {
+    success(`${changed} file(s) updated`);
+  } else if (
+    outcome.keptUpdates.length + outcome.skippedNew.length +
+    outcome.conflicts.length + outcome.keptDirty.length > 0
+  ) {
+    info("Nothing updated — your local versions were kept.");
+  } else {
+    info("Everything is up to date.");
+  }
 
   writeConfig(dir, {
     ...config,

@@ -97,14 +97,19 @@ export async function selectBranch(): Promise<string | typeof EXIT> {
   return branch;
 }
 
-export async function selectPublishFiles(paths: string[]): Promise<string[] | typeof BACK | typeof EXIT> {
-  const result = await pickMany(
-    "Which modified skills do you want to publish?",
-    paths.map((p) => ({ value: p, label: p })),
-    { required: false },
-  );
-  if (result === EXIT) return EXIT;
+export async function selectFilesToUpdate(
+  entries: string[] | { value: string; label: string }[],
+  message: string,
+): Promise<string[] | typeof BACK | typeof EXIT> {
+  if (entries.length === 0) return [];
+  const options = entries.map((e) => (typeof e === "string" ? { value: e, label: e } : e));
+  const result = await pickMany(message, options, { required: false });
+  if (result === BACK || result === EXIT) return result;
   return result;
+}
+
+export async function selectPublishFiles(paths: string[]): Promise<string[] | typeof BACK | typeof EXIT> {
+  return selectFilesToUpdate(paths, "Which modified skills do you want to publish?");
 }
 
 export async function enterNewVersion(path: string, current: string): Promise<string | typeof EXIT> {
