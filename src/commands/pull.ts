@@ -91,6 +91,7 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
   for (const p of outcome.upToDate) fileStatus(p, "current");
   for (const p of outcome.keptUpdates) info(`Kept local (not updated): ${p}`);
   for (const p of outcome.skippedNew) info(`Skipped new file: ${p}`);
+  for (const p of outcome.resynced) info(`Already in sync with the repo (adopted): ${p}`);
   if (outcome.unverifiedContent.length > 0) {
     warn(`Could not verify ${outcome.unverifiedContent.length} file(s) against upstream: ${outcome.unverifiedContent.join(", ")}`);
   }
@@ -99,7 +100,7 @@ export async function pull(dir: string = process.cwd()): Promise<void> {
     success(`${changed} file(s) updated`);
   } else if (
     outcome.keptUpdates.length + outcome.skippedNew.length +
-    outcome.conflicts.length + outcome.keptDirty.length > 0
+    outcome.conflicts.length + outcome.keptDirty.length + outcome.resynced.length > 0
   ) {
     info("Nothing updated — your local versions were kept.");
   } else {

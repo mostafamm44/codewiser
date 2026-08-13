@@ -39,6 +39,11 @@ export interface SyncOutcome {
   // overwriting with the upstream version.
   keptDirty: string[];
   conflicts: string[];
+  // Files where both the repo and the on-disk file moved off the tracked
+  // baseline but now agree with each other (e.g. an edit already published or
+  // pulled in). The change came from the repo, so the baseline is re-adopted
+  // with no download or prompt.
+  resynced: string[];
   upToDate: string[];
   // Paths where the content comparison could not be performed (fetch/hash
   // failure), so a same-version upstream edit may have been missed silently.
@@ -52,6 +57,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   const updateCandidates: string[] = [];
   const dirtyUpdateCandidates: string[] = [];
   const keptDirtyCandidates: string[] = [];
+  const resyncedCandidates: string[] = [];
   const upToDateCandidates: string[] = [];
   const unverifiedContentCandidates: string[] = [];
 
@@ -77,29 +83,31 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     }
 
     const versionNewer = versionLt(localVer, remoteVer);
+    const baselineHash = storedHash ?? currentHash;
 
-    // Detect upstream content changes even when the version didn't move. Only
-    // worth fetching when the version alone wouldn't already flag an update.
-    let remoteDiffers = false;
-    if (!versionNewer && contentFetcher) {
-      if (currentHash) {
-        const remoteContent = await contentFetcher(path);
-        if (remoteContent !== null) {
-          remoteDiffers = sha256Text(remoteContent) !== currentHash;
-        } else {
-          unverifiedContentCandidates.push(path);
-        }
-      } else {
-        // Couldn't hash the local file (missing/unreadable): content comparison
-        // is skipped rather than silently risking a missed change.
-        unverifiedContentCandidates.push(path);
-      }
+    // Fetch the upstream file once and compare it against the tracked baseline,
+    // NOT the on-disk file. Comparing against the disk would misattribute a
+    // local-only edit as an upstream change (and vice versa).
+    let remoteHash: string | null = null;
+    if (contentFetcher && baselineHash) {
+      const remoteContent = await contentFetcher(path);
+      if (remoteContent !== null) remoteHash = sha256Text(remoteContent);
+      else unverifiedContentCandidates.push(path);
     }
 
+    const remoteChanged = versionNewer || (remoteHash !== null && remoteHash !== baselineHash);
+    // When the on-disk file already matches the repo, the change came from the
+    // repo (or was published): both sides agree, only the baseline is stale.
+    const bothAgree = remoteHash !== null && currentHash !== null && remoteHash === currentHash;
+
     if (dirty) {
-      if (versionNewer || remoteDiffers) dirtyUpdateCandidates.push(path);
-      else keptDirtyCandidates.push(path);
-    } else if (versionNewer || remoteDiffers) {
+      if (remoteChanged) {
+        if (bothAgree) resyncedCandidates.push(path);
+        else dirtyUpdateCandidates.push(path);
+      } else {
+        keptDirtyCandidates.push(path);
+      }
+    } else if (remoteChanged) {
       updateCandidates.push(path);
     } else {
       upToDateCandidates.push(path);
@@ -128,6 +136,11 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   for (const [path, remoteVer] of Object.entries(remoteFiles)) {
     const dest = join(targetDir, ...path.split("/"));
     if (downloadedNew.has(path) || downloadedUpdates.has(path)) {
+      files[path] = { version: remoteVer, sha256: sha256File(dest) ?? undefined };
+      continue;
+    }
+    if (resyncedCandidates.includes(path)) {
+      // The on-disk file already equals the repo; adopt it as the new baseline.
       files[path] = { version: remoteVer, sha256: sha256File(dest) ?? undefined };
       continue;
     }
@@ -167,6 +180,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     skippedNew,
     keptDirty,
     conflicts,
+    resynced: resyncedCandidates,
     upToDate: upToDateCandidates,
     unverifiedContent: unverifiedContentCandidates,
   };
