@@ -38,6 +38,32 @@ function hasGh(): boolean {
   return runCmd("gh", ["--version"]).ok;
 }
 
+// git merge-file writes markers `<<<<<<<` / `=======` / `>>>>>>>` when the sides
+// overlap. Report the 1-based line range of each conflicted hunk.
+function conflictRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const lines = text.split("\n");
+  let start: number | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]?.trimStart() ?? "";
+    if (line.startsWith("<<<<<<<")) {
+      start = i + 1;
+    } else if (line.startsWith(">>>>>>>") && start !== null) {
+      ranges.push({ start, end: i + 1 });
+      start = null;
+    }
+  }
+  return ranges;
+}
+
+function hasConflicts(text: string): boolean {
+  return text.includes("<<<<<<<");
+}
+
+function conflictLocationText(text: string): string {
+  return conflictRanges(text).map((r) => `lines ${r.start}-${r.end}`).join(", ") || "unknown lines";
+}
+
 export async function publish(dir: string = process.cwd()): Promise<void> {
   const config = readConfig(dir);
 
@@ -124,17 +150,27 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
         continue;
       }
 
+      const source = readFileSync(filePath(dir, path), "utf-8");
+      if (hasConflicts(source)) {
+        dirty.delete(path);
+        warn(
+          `Merged ${path} earlier but conflict markers are still in the file (${conflictLocationText(source)}). ` +
+          `Resolve the markers, then run 'codewiser publish' again. Excluded from this PR.`,
+        );
+        continue;
+      }
+
       const choice = await choosePullFirst(path);
       if (choice === EXIT) {
         process.exitCode = 1;
         return;
       }
       if (choice === "asIs") {
+        writeBase(dir, path, source);
         info(`Publishing local version of ${path} as-is (team's changes left for PR review).`);
         continue;
       }
 
-      const source = readFileSync(filePath(dir, path), "utf-8");
       const result = mergeThreeWay(source, base, fetched);
       if (result.ok && sha256Text(result.merged) !== sha256Text(source)) {
         writeFileSync(filePath(dir, path), result.merged, "utf-8");
@@ -146,10 +182,11 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
             `your version is unchanged.`,
         );
       } else {
+        writeFileSync(filePath(dir, path), result.merged, "utf-8");
         dirty.delete(path);
         warn(
-          `Merged ${path} but your edits overlap the team's — conflict markers left in the file. ` +
-          `Resolve them, then run 'codewiser publish' again. Excluded from this PR.`,
+          `Merged ${path} but your edits overlap the team's at ${conflictLocationText(result.merged)} — ` +
+          `conflict markers left in the file. Resolve them, then run 'codewiser publish' again. Excluded from this PR.`,
         );
       }
     }
