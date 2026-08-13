@@ -83,11 +83,21 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
       const localVer = localFiles[path]?.version ?? "0.0.0";
       const fetched = await fetchRemoteContent(RAW_BASE, path);
       const base = readBase(dir, path);
+      const fetchedSameAsBase =
+        fetched !== null && base !== null && sha256Text(fetched) === sha256Text(base);
       const remoteChanged =
         (remoteVer !== undefined && versionLt(localVer, remoteVer)) ||
         (fetched !== null && base !== null && sha256Text(fetched) !== sha256Text(base));
 
       if (!remoteChanged) continue;
+
+      if (fetchedSameAsBase && remoteVer !== undefined && versionLt(localVer, remoteVer)) {
+        info(
+          `Team bumped ${path} to ${remoteVer}, but its content is identical to your last sync — ` +
+            `nothing new to merge. Publishing your version.`,
+        );
+        continue;
+      }
 
       if (base === null || fetched === null) {
         // No content baseline cached (or the fetch failed): keep the win-lose
@@ -124,10 +134,17 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
         continue;
       }
 
-      const result = mergeThreeWay(readFileSync(filePath(dir, path), "utf-8"), base, fetched);
-      writeFileSync(filePath(dir, path), result.merged, "utf-8");
-      if (result.ok) {
+      const source = readFileSync(filePath(dir, path), "utf-8");
+      const result = mergeThreeWay(source, base, fetched);
+      if (result.ok && sha256Text(result.merged) !== sha256Text(source)) {
+        writeFileSync(filePath(dir, path), result.merged, "utf-8");
         info(`Merged team changes into ${path}; your edits are kept.`);
+        writeBase(dir, path, result.merged);
+      } else if (result.ok) {
+        info(
+          `Merged ${path} but the team's copy has no new content since your last sync — ` +
+            `your version is unchanged.`,
+        );
       } else {
         dirty.delete(path);
         warn(
