@@ -8,7 +8,7 @@ license: MIT
 
 ## Purpose
 
-Before any agent can follow the execution protocol, the shared context files must exist and reflect the current state of the project. This skill handles initializing or enriching those files, including customizing the execution protocol based on the selected development mode and project domain.
+newBefore any agent can follow the execution protocol, the shared context files must exist and reflect the current state of the project. This skill handles initializing or enriching those files, including customizing the execution protocol based on the selected development mode and project domain.
 
 ## Targets
 
