@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -28,15 +28,8 @@ export const PROJECT_MANIFEST_FILENAME = "codewiser.json";
 // The user-profile config (~/.codewiser.json) holding machine-wide repo/branch defaults.
 export const CONFIG_FILENAME = ".codewiser.json";
 
-// Legacy per-project ledger (hidden dotfile) that predates the merged manifest.
-export const LEGACY_CONFIG_FILENAME = ".codewiser.json";
-
 export function getProjectManifestPath(targetDir: string): string {
   return join(targetDir, PROJECT_MANIFEST_FILENAME);
-}
-
-export function getLegacyConfigPath(targetDir: string): string {
-  return join(targetDir, LEGACY_CONFIG_FILENAME);
 }
 
 export function getGlobalConfigPath(): string {
@@ -95,24 +88,18 @@ function writeConfigToPath(path: string, config: CodewiserConfig): void {
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
 }
 
-// Project manifest: prefer `./codewiser.json` (merged), fall back to the legacy
-// `./.codewiser.json` dotfile so pre-sync projects keep working.
+// Read the project's merged manifest. Previously fell back to a legacy
+// .codewiser.json dotfile for backward compatibility with pre-sync projects.
+// That fallback was removed — the legacy format is no longer supported.
 export function readConfig(targetDir: string): CodewiserConfig | null {
-  return readConfigFromPath(getProjectManifestPath(targetDir)) ?? readConfigFromPath(getLegacyConfigPath(targetDir));
+  return readConfigFromPath(getProjectManifestPath(targetDir));
 }
 
-// Writes the merged `./codewiser.json` and removes a legacy dotfile if present.
+// Write the merged manifest. Previously also deleted any legacy .codewiser.json
+// dotfile as a one-time migration. That cleanup was removed along with the
+// legacy fallback — only ./codewiser.json is read/written now.
 export function writeConfig(targetDir: string, config: CodewiserConfig): void {
-  const path = getProjectManifestPath(targetDir);
-  writeConfigToPath(path, config);
-  const legacy = getLegacyConfigPath(targetDir);
-  if (legacy !== path && existsSync(legacy)) {
-    try {
-      rmSync(legacy, { force: true });
-    } catch {
-      // non-fatal: legacy dotfile left in place
-    }
-  }
+  writeConfigToPath(getProjectManifestPath(targetDir), config);
 }
 
 export function readGlobalConfig(): CodewiserConfig | null {
@@ -136,29 +123,63 @@ export function normalizeFileVersions(files?: FileRecord): Record<string, FileVe
   return result;
 }
 
-export function resolveRepo(_dir: string, cliRepo?: string, manifestRepo?: string, globalRepo?: string): string {
+// F4: Extended resolution with a project tier (2nd after CLI) so re-init
+// preserves the target project's saved repo/branch. Resolution order:
+// CLI flag → existing project config → CWD manifest → global profile → default.
+// This prevents clobbering a project's settings when running init again.
+export function resolveRepo(
+  _dir: string,
+  cliRepo?: string,
+  projectRepo?: string,
+  manifestRepo?: string,
+  globalRepo?: string,
+): string {
   if (cliRepo) return cliRepo;
+  if (projectRepo) return projectRepo;
   if (manifestRepo) return manifestRepo;
   if (globalRepo) return globalRepo;
   return DEFAULT_REPO;
 }
 
-export function resolveBranch(_dir: string, cliBranch?: string, manifestBranch?: string, globalBranch?: string): string {
+export function resolveBranch(
+  _dir: string,
+  cliBranch?: string,
+  projectBranch?: string,
+  manifestBranch?: string,
+  globalBranch?: string,
+): string {
   if (cliBranch) return cliBranch;
+  if (projectBranch) return projectBranch;
   if (manifestBranch) return manifestBranch;
   if (globalBranch) return globalBranch;
   return DEFAULT_BRANCH;
 }
 
-export function describeRepoSource(_dir: string, cliRepo?: string, manifestRepo?: string, globalRepo?: string): string {
+// F4: Matching describe functions so the "from ..." message reflects the
+// actual source tier (e.g., "existing project config" vs "./codewiser.json").
+export function describeRepoSource(
+  _dir: string,
+  cliRepo?: string,
+  projectRepo?: string,
+  manifestRepo?: string,
+  globalRepo?: string,
+): string {
   if (cliRepo) return "--repo flag";
+  if (projectRepo) return "existing project config";
   if (manifestRepo) return "./codewiser.json";
   if (globalRepo) return "user profile (~/.codewiser.json)";
   return "built-in default";
 }
 
-export function describeBranchSource(_dir: string, cliBranch?: string, manifestBranch?: string, globalBranch?: string): string {
+export function describeBranchSource(
+  _dir: string,
+  cliBranch?: string,
+  projectBranch?: string,
+  manifestBranch?: string,
+  globalBranch?: string,
+): string {
   if (cliBranch) return "--branch flag";
+  if (projectBranch) return "existing project config";
   if (manifestBranch) return "./codewiser.json";
   if (globalBranch) return "user profile (~/.codewiser.json)";
   return "built-in default";
@@ -170,4 +191,27 @@ export function buildRawBase(repo: string, branch: string): string {
 
 export function validateRepoFormat(repo: string): boolean {
   return /^[\w.-]+\/[\w.-]+$/.test(repo);
+}
+
+// F5/F13: Validate manifest paths before joining to prevent directory traversal.
+// Manifest paths come from GitHub (upstream codewiser.json) and are joined with
+// targetDir to compute download destinations. A malicious manifest with paths
+// like "../../etc/passwd" or absolute paths could write files outside targetDir.
+// This helper rejects: empty, "." or ".." segments, backslashes, absolute paths.
+export function isSafeRelPath(path: string): boolean {
+  if (!path || path.length === 0) return false;
+  if (path.includes("\\")) return false;
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
+  const segments = path.split("/");
+  for (const seg of segments) {
+    if (seg === "" || seg === "." || seg === "..") return false;
+  }
+  return true;
+}
+
+// Throwing variant for use in init/pull where abort is the right response.
+export function assertSafeRelPath(path: string): void {
+  if (!isSafeRelPath(path)) {
+    throw new Error(`unsafe manifest path: "${path}"`);
+  }
 }

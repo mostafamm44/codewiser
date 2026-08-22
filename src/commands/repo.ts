@@ -35,11 +35,11 @@ export function repoGet(dir: string = process.cwd()): void {
   const global = readGlobalConfig();
   const globalPath = getGlobalConfigPath();
 
-  const repo = resolveRepo(dir, undefined, manifest?.repo, global?.repo);
-  const branch = resolveBranch(dir, undefined, manifest?.branch, global?.branch);
+  const repo = resolveRepo(dir, undefined, undefined, manifest?.repo, global?.repo);
+  const branch = resolveBranch(dir, undefined, undefined, manifest?.branch, global?.branch);
   info(`repo: ${repo}`);
   info(`branch: ${branch}`);
-  info(`  from ${describeRepoSource(dir, undefined, manifest?.repo, global?.repo)} / ${describeBranchSource(dir, undefined, manifest?.branch, global?.branch)}`);
+  info(`  from ${describeRepoSource(dir, undefined, undefined, manifest?.repo, global?.repo)} / ${describeBranchSource(dir, undefined, undefined, manifest?.branch, global?.branch)}`);
 
   if (manifest) {
     info(`project config: ./codewiser.json → ${manifest.repo ?? "not set"} / ${manifest.branch ?? "not set"}`);
@@ -137,11 +137,11 @@ export function repoReset(dir: string = process.cwd(), global = false): void {
   delete manifest.repo;
   delete manifest.branch;
   writeManifest(dir, manifest);
-  const repo = resolveRepo(dir, undefined, undefined, readGlobalConfig()?.repo);
-  const branch = resolveBranch(dir, undefined, undefined, readGlobalConfig()?.branch);
+  const repo = resolveRepo(dir, undefined, undefined, undefined, readGlobalConfig()?.repo);
+  const branch = resolveBranch(dir, undefined, undefined, undefined, readGlobalConfig()?.branch);
   if (hadOverride) {
     success(`repo overrides removed; will now use ${repo}@${branch}`);
-    info(`  from ${describeRepoSource(dir, undefined, undefined, readGlobalConfig()?.repo)} / ${describeBranchSource(dir, undefined, undefined, readGlobalConfig()?.branch)}`);
+    info(`  from ${describeRepoSource(dir, undefined, undefined, undefined, readGlobalConfig()?.repo)} / ${describeBranchSource(dir, undefined, undefined, undefined, readGlobalConfig()?.branch)}`);
   } else {
     info("no repo/branch overrides were set");
   }

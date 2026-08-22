@@ -54,18 +54,23 @@ if (first === "repo") {
     console.error(cli.help);
     process.exit(1);
   }
+// F11: Forward --repo/--branch flags to pull, publish, and sync so one-off
+// overrides work without requiring `repo set` first.
+// F12: Removed ".." from resolve() — the old code resolved "codewiser my-project"
+// from /work to /my-project (sibling), contradicting the help text and README.
+// Now resolves to /work/my-project as users expect.
 } else if (first === "pull") {
-  await pull(process.cwd());
+  await pull(process.cwd(), cli.flags.repo, cli.flags.branch);
 } else if (first === "publish") {
-  await publish(process.cwd());
+  await publish(process.cwd(), cli.flags.repo, cli.flags.branch);
 } else if (first === "sync") {
-  await sync(process.cwd());
+  await sync(process.cwd(), cli.flags.repo, cli.flags.branch);
 } else {
   if (!first) {
     console.error("error: <project-directory> is required");
     console.error(cli.help);
     process.exit(1);
   }
-  const targetDir = resolve(process.cwd(), "..", first);
+  const targetDir = resolve(process.cwd(), first);
   await init(targetDir, cli.flags.repo, cli.flags.branch);
 }

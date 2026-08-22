@@ -1,5 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
+// F13: Validate manifest paths before joining to prevent directory traversal
+// attacks via malicious codewiser.json entries (e.g., "../../etc/passwd").
+import { assertSafeRelPath } from "./config";
 
 // Store the last-synced content of each synced file (the "base" for three-way
 // merges on publish) out-of-band under `.codewiser-cache/`. The manifest only
@@ -13,6 +16,7 @@ export function getCacheDir(targetDir: string): string {
 }
 
 export function cachePath(targetDir: string, path: string): string {
+  assertSafeRelPath(path);
   return join(getCacheDir(targetDir), ...path.split("/"));
 }
 

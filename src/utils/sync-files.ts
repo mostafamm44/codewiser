@@ -3,6 +3,8 @@ import { join } from "path";
 import { download } from "./download";
 import { sha256File, sha256Text } from "./hash";
 import { versionLt } from "./manifest";
+// F13: Validate manifest paths before joining to prevent directory traversal.
+import { assertSafeRelPath } from "./config";
 import type { FileVersion } from "./config";
 
 export type FilesMap = Record<string, FileVersion>;
@@ -52,7 +54,16 @@ export interface SyncOutcome {
   // Paths where the content comparison could not be performed (fetch/hash
   // failure), so a same-version upstream edit may have been missed silently.
   unverifiedContent: string[];
+  // F23: Accepted updates/overwrites whose download failed. The local copy was
+  // kept but this must not be reported as "kept by choice" — it's a failure.
+  // Without this, a failed download of an accepted update would land in
+  // keptUpdates and be misreported as "you kept your local copy".
+  failedDownloads: string[];
 }
+
+// F19: Bounded concurrency for upstream content prefetch. Controls how many
+// simultaneous HTTP requests are made during the classification loop.
+const FETCH_CONCURRENCY = 8;
 
 export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   const { targetDir, rawBase, remoteFiles, localFiles = {}, callbacks, contentFetcher } = opts;
@@ -66,7 +77,35 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   const upToDateCandidates: string[] = [];
   const unverifiedContentCandidates: string[] = [];
 
-  for (const [path, remoteVer] of Object.entries(remoteFiles)) {
+  const entries = Object.entries(remoteFiles);
+  // F13: Validate every remoteFiles path before using it as a filesystem
+  // destination. This prevents a malicious manifest from escaping targetDir.
+  const existingPaths = entries
+    .map(([path]) => path)
+    .filter((path) => {
+      assertSafeRelPath(path);
+      return existsSync(join(targetDir, ...path.split("/")));
+    });
+
+  // F19: Prefetch upstream content for tracked files with bounded concurrency
+  // instead of issuing sequential requests. Results are reused in the
+  // classification loop below, avoiding redundant HTTP calls.
+  const remoteContent = new Map<string, string | null>();
+  if (contentFetcher) {
+    let i = 0;
+    const worker = async (): Promise<void> => {
+      while (i < existingPaths.length) {
+        const path = existingPaths[i++]!;
+        remoteContent.set(path, await contentFetcher(path));
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(FETCH_CONCURRENCY, existingPaths.length) }, () => worker()),
+    );
+  }
+
+  for (const [path, remoteVer] of entries) {
+    assertSafeRelPath(path);
     const dest = join(targetDir, ...path.split("/"));
     if (!existsSync(dest)) {
       newCandidates.push(path);
@@ -78,13 +117,13 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     const storedHash = stored?.sha256;
     const currentHash = sha256File(dest);
 
+    // F25: Removed the mutation of stored.sha256 for legacy entries. The old
+    // code set stored.sha256 = currentHash as a side effect, which modified the
+    // caller-owned localFiles object in place. The rebuild loop at the bottom
+    // already handles baseline adoption, so this mutation was redundant.
     let dirty = false;
     if (storedHash) {
       dirty = currentHash !== null && currentHash !== storedHash;
-    } else {
-      // Legacy entry without a tracked hash: adopt the current hash as baseline.
-      if (stored) stored.sha256 = currentHash ?? undefined;
-      dirty = false;
     }
 
     const remoteNewer = versionLt(localVer, remoteVer);
@@ -92,24 +131,24 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     const versionEqual = !remoteNewer && !localAhead;
     const baselineHash = storedHash ?? currentHash;
 
-    // Fetch the upstream file once and compare it against the tracked baseline,
-    // NOT the on-disk file. Comparing against the disk would misattribute a
-    // local-only edit as an upstream change (and vice versa).
+    // F19: Record unverified when local hash is unavailable (file unreadable)
+    // and no stored hash exists. These paths must not be classified as up-to-date
+    // because we can't confirm they match the upstream content.
+    let unverified = false;
     let remoteHash: string | null = null;
-    if (contentFetcher && baselineHash) {
-      const remoteContent = await contentFetcher(path);
-      if (remoteContent !== null) remoteHash = sha256Text(remoteContent);
-      else unverifiedContentCandidates.push(path);
+    if (contentFetcher) {
+      const fetched = remoteContent.get(path);
+      if (fetched !== undefined && fetched !== null) {
+        remoteHash = sha256Text(fetched);
+      } else if (fetched !== undefined) {
+        unverified = true;
+      }
     }
+    if (currentHash === null && !storedHash) unverified = true;
+    if (unverified) unverifiedContentCandidates.push(path);
 
-    // A remote change is a strictly newer version, or — only when versions are
-    // equal — different content. When our version is already ahead (e.g. a
-    // publish PR not merged yet) the remote being behind is expected, so it is
-    // never treated as a team update nor a reason to downgrade.
     const remoteChanged =
       remoteNewer || (versionEqual && remoteHash !== null && remoteHash !== baselineHash);
-    // When the on-disk file already matches the repo, the change came from the
-    // repo (or was published): both sides agree, only the baseline is stale.
     const bothAgree = remoteHash !== null && currentHash !== null && remoteHash === currentHash;
 
     if (dirty) {
@@ -125,7 +164,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
       updateCandidates.push(path);
     } else if (localAhead) {
       localAheadCandidates.push(path);
-    } else {
+    } else if (!unverified) {
       upToDateCandidates.push(path);
     }
   }
@@ -136,12 +175,19 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
 
   const downloadedNew = new Set<string>();
   const downloadedUpdates = new Set<string>();
+  // F23: Track download failures separately. Without this, a failed download
+  // of an accepted update would land in keptUpdates (because it wasn't in
+  // downloadedUpdates) and be misreported as "you kept your local copy".
+  const failedDownloads = new Set<string>();
 
+  // F13: Validate each path in syncBatch before downloading as defense-in-depth.
   const syncBatch = async (paths: string[], target: Set<string>): Promise<void> => {
     for (const path of paths) {
+      assertSafeRelPath(path);
       const dest = join(targetDir, ...path.split("/"));
       const ok = await download(`${rawBase}/${path}`, dest);
       if (ok) target.add(path);
+      else failedDownloads.add(path);
     }
   };
 
@@ -150,6 +196,7 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
 
   const files: FilesMap = { ...localFiles };
   for (const [path, remoteVer] of Object.entries(remoteFiles)) {
+    assertSafeRelPath(path);
     const dest = join(targetDir, ...path.split("/"));
     if (downloadedNew.has(path) || downloadedUpdates.has(path)) {
       files[path] = { version: remoteVer, sha256: sha256File(dest) ?? undefined };
@@ -185,8 +232,10 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
   const skippedNew = [...newCandidates.filter((p) => !downloadedNew.has(p))];
   // "downloadedUpdates" merges clean updates and overwritten dirty files; since a
   // path can only ever be one kind of candidate, the filtering is unambiguous.
-  const keptUpdates = [...updateCandidates.filter((p) => !downloadedUpdates.has(p))];
-  const conflicts = [...dirtyUpdateCandidates.filter((p) => !downloadedUpdates.has(p))];
+  // Failed downloads are excluded from both kept-by-choice buckets and surfaced
+  // separately as failedDownloads.
+  const keptUpdates = [...updateCandidates.filter((p) => !downloadedUpdates.has(p) && !failedDownloads.has(p))];
+  const conflicts = [...dirtyUpdateCandidates.filter((p) => !downloadedUpdates.has(p) && !failedDownloads.has(p))];
 
   return {
     files,
@@ -200,5 +249,6 @@ export async function syncFiles(opts: SyncOptions): Promise<SyncOutcome> {
     localAhead: localAheadCandidates,
     upToDate: upToDateCandidates,
     unverifiedContent: unverifiedContentCandidates,
+    failedDownloads: [...failedDownloads],
   };
 }

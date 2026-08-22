@@ -19,7 +19,7 @@ import {
   addExecutionProtocolToAgentsMD,
 } from "../utils/generate-configs";
 import { createAllSymlinks } from "../utils/symlinks";
-import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource, normalizeFileVersions } from "../utils/config";
+import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, describeRepoSource, describeBranchSource, normalizeFileVersions, assertSafeRelPath } from "../utils/config";
 import { syncFiles, type SyncOutcome } from "../utils/sync-files";
 import { writeBase } from "../utils/cache";
 import { readManifest } from "./repo";
@@ -37,11 +37,13 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   const existingConfig = readConfig(targetDir);
   const localManifest = readManifest(process.cwd());
   const globalConfig = readGlobalConfig();
-  const repo = resolveRepo(process.cwd(), cliRepo, localManifest?.repo, globalConfig?.repo);
-  const branch = resolveBranch(process.cwd(), cliBranch, localManifest?.branch, globalConfig?.branch);
+  // F4: Pass existingConfig?.repo/branch right after CLI values so re-init
+  // preserves the target project's saved settings instead of clobbering them.
+  const repo = resolveRepo(process.cwd(), cliRepo, existingConfig?.repo, localManifest?.repo, globalConfig?.repo);
+  const branch = resolveBranch(process.cwd(), cliBranch, existingConfig?.branch, localManifest?.branch, globalConfig?.branch);
   const RAW_BASE = buildRawBase(repo, branch);
   info(`Repo: ${repo} (branch: ${branch})`);
-  info(`  from ${describeRepoSource(process.cwd(), cliRepo, localManifest?.repo, globalConfig?.repo)} / ${describeBranchSource(process.cwd(), cliBranch, localManifest?.branch, globalConfig?.branch)}`);
+  info(`  from ${describeRepoSource(process.cwd(), cliRepo, existingConfig?.repo, localManifest?.repo, globalConfig?.repo)} / ${describeBranchSource(process.cwd(), cliBranch, existingConfig?.branch, localManifest?.branch, globalConfig?.branch)}`);
 
   let agents: SelectedAgents | null = null;
   let selectedMode = "";
@@ -225,6 +227,18 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   const abort = new Error("init aborted");
   const localFiles = normalizeFileVersions(existingConfig?.files);
 
+  // F5: Validate every manifest path before touching the filesystem. A malicious
+  // or buggy upstream codewiser.json could contain paths like "../../etc/passwd"
+  // that would write files outside targetDir via the download engine.
+  try {
+    for (const path of [...Object.keys(remoteFiles), ...Object.keys(localFiles)]) {
+      assertSafeRelPath(path);
+    }
+  } catch (e) {
+    error(`Aborting: unsafe manifest path ${e instanceof Error ? `(${e.message})` : ""}`);
+    return;
+  }
+
   let outcome: SyncOutcome;
   try {
     outcome = await syncFiles({
@@ -234,10 +248,13 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
       localFiles,
       callbacks: {
         async onNew(paths) { return paths; },
+        // F2: Removed the old "/SKILL.md" filter that silently dropped updates
+        // to non-skill files (AGENTS.md, specs, etc.) during re-init. Now every
+        // tracked remote file goes through the same version comparison and
+        // confirmOverwrite prompt, so re-init is consistent across file types.
         async onUpdate(paths) {
           const accepted: string[] = [];
           for (const path of paths) {
-            if (!path.endsWith("/SKILL.md")) continue;
             const remoteVer = remoteFiles[path] ?? "0.0.0";
             const localVer = localFiles[path]?.version ?? "0.0.0";
             if (!versionLt(localVer, remoteVer)) continue;
@@ -259,7 +276,20 @@ export async function init(targetDirInput: string, cliRepo?: string, cliBranch?:
   for (const p of outcome.downloadedUpdates) fileStatus(p, "updated");
   for (const p of outcome.keptDirty) warn(`Modified locally, kept: ${p}`);
   for (const p of outcome.conflicts) warn(`Modified locally with a newer version upstream: ${p}`);
+  // F23: Surface download failures separately from "kept by choice" — without
+  // this, a failed download of an accepted update would be misreported as
+  // "kept your local copy" in the keptUpdates bucket.
+  for (const p of outcome.failedDownloads) warn(`Download failed, kept local copy: ${p}`);
   for (const p of outcome.upToDate) fileStatus(p, "current");
+
+  // F3: Check skippedNew before proceeding. A failed download of a new file
+  // means setup is incomplete — reporting success and writing the config
+  // would leave the project in a half-initialized state.
+  if (outcome.skippedNew.length > 0) {
+    error("Some files could not be downloaded; setup was not completed.");
+    for (const p of outcome.skippedNew) warn(p);
+    return;
+  }
 
   for (const p of [...outcome.downloadedNew, ...outcome.downloadedUpdates]) {
     try {

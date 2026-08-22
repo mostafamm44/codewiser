@@ -1,6 +1,7 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+// F8: Added dirname for parent directory creation before cpSync in staging.
+import { dirname, join } from "path";
 import { execFileSync } from "child_process";
 import { readConfig, writeConfig, readGlobalConfig, resolveRepo, resolveBranch, buildRawBase, normalizeFileVersions } from "../utils/config";
 import { info, warn, error, success, confirmPrompt, EXIT, BACK } from "../utils/ui";
@@ -8,7 +9,8 @@ import { selectPublishFiles, enterNewVersion, chooseUpdateOrKeep, choosePullFirs
 import { download } from "../utils/download";
 import { versionLt } from "../utils/manifest";
 import { sha256File, sha256Text } from "../utils/hash";
-import { fetchManifest, flattenRemoteManifest, MANIFEST_TIMEOUT_MS } from "../utils/remote";
+// F24: Use shared fetchRemoteContent from remote.ts instead of a local closure.
+import { fetchManifest, fetchRemoteContent, flattenRemoteManifest } from "../utils/remote";
 import { readBase, writeBase } from "../utils/cache";
 
 function filePath(dir: string, rel: string): string {
@@ -64,7 +66,9 @@ function conflictLocationText(text: string): string {
   return conflictRanges(text).map((r) => `lines ${r.start}-${r.end}`).join(", ") || "unknown lines";
 }
 
-export async function publish(dir: string = process.cwd()): Promise<void> {
+// F11: Accept optional CLI overrides for repo/branch so `codewiser publish --repo X`
+// works without requiring `repo set` first.
+export async function publish(dir: string = process.cwd(), cliRepo?: string, cliBranch?: string): Promise<void> {
   const config = readConfig(dir);
 
   if (!config || !config.files) {
@@ -75,8 +79,8 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
   }
 
   const globalConfig = readGlobalConfig();
-  const repo = resolveRepo(dir, undefined, config.repo, globalConfig?.repo);
-  const branch = resolveBranch(dir, undefined, config.branch, globalConfig?.branch);
+  const repo = resolveRepo(dir, cliRepo, undefined, config.repo, globalConfig?.repo);
+  const branch = resolveBranch(dir, cliBranch, undefined, config.branch, globalConfig?.branch);
   const RAW_BASE = buildRawBase(repo, branch);
   info(`Publishing against ${repo}@${branch}`);
 
@@ -181,12 +185,23 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
           `Merged ${path} but the team's copy has no new content since your last sync — ` +
             `your version is unchanged.`,
         );
-      } else {
-        writeFileSync(filePath(dir, path), result.merged, "utf-8");
+      } else if (hasConflicts(result.merged)) {
+        // F7: Only overwrite the working file when there are real conflict markers.
+        // Back up the original first so the user can recover if needed.
+        const dest = filePath(dir, path);
+        writeFileSync(`${dest}.bak`, source, "utf-8");
+        writeFileSync(dest, result.merged, "utf-8");
         dirty.delete(path);
         warn(
           `Merged ${path} but your edits overlap the team's at ${conflictLocationText(result.merged)} — ` +
-          `conflict markers left in the file. Resolve them, then run 'codewiser publish' again. Excluded from this PR.`,
+          `conflict markers left in the file (backup saved as ${path}.bak). Resolve them, then run 'codewiser publish' again. Excluded from this PR.`,
+        );
+      } else {
+        // F7: Non-conflict merge failure (e.g., git merge-file exception).
+        // Keep the local file and keep it dirty so the user can publish as-is.
+        warn(
+          `Failed to merge team changes into ${path}; your local version was left unchanged. ` +
+            `Run 'codewiser pull' to fetch their version, or publish as-is.`,
         );
       }
     }
@@ -280,6 +295,10 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
       const src = filePath(dir, path);
       const dest = filePath(tmp, path);
       if (existsSync(src)) {
+        // F8: Create parent directories recursively before copying. For brand-new
+        // skills that don't exist upstream yet, the dest directory structure
+        // may not exist in the fresh clone — cpSync would fail with ENOENT.
+        mkdirSync(dirname(dest), { recursive: true });
         cpSync(src, dest, { force: true });
         info(`Staged ${path}`);
       }
@@ -288,7 +307,12 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
     const manifestPath = filePath(tmp, "codewiser.json");
     if (existsSync(manifestPath)) {
       const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
-      bumpManifestVersions(manifest, selected, versions);
+      const bumped = bumpManifestVersions(manifest, selected, versions);
+      if (!bumped) {
+        error("Could not locate or add the published skill paths in the upstream codewiser.json; versions were not bumped.");
+        process.exitCode = 1;
+        return;
+      }
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
       info("Updated versions in codewiser.json");
     } else {
@@ -320,24 +344,18 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
     let push = runCmd("git", ["push", "-u", "origin", "HEAD"], tmp);
     if (!push.ok) {
       warn(`Direct push failed (${push.err}); trying a fork...`);
-      const fork = runCmd("gh", ["repo", "fork", repo, "--remote"]);
+      // F9: Use fixed remote name "fork" instead of discovering the first
+      // non-origin remote. Running gh repo fork from tmp (the cloned repo)
+      // without passing the repo arg lets gh infer it from the current directory.
+      const fork = runCmd("gh", ["repo", "fork", "--remote", "--remote-name", "fork"], tmp);
       if (!fork.ok) {
         error(`Fork failed: ${fork.err}`);
         error(`Check write access to ${repo} and your gh auth.`);
         process.exitCode = 1;
         return;
       }
-      const remotes = runCmd("git", ["remote"], tmp);
-      const forkRemote = remotes.out
-        .split(/\s+/)
-        .filter(Boolean)
-        .find((r) => r !== "origin");
-      if (!forkRemote) {
-        error("Created a fork but could not find its git remote.");
-        process.exitCode = 1;
-        return;
-      }
-      push = runCmd("git", ["push", "-u", forkRemote, "HEAD"], tmp);
+      // Push to the known "fork" remote instead of scanning remotes.
+      push = runCmd("git", ["push", "-u", "fork", "HEAD"], tmp);
       if (!push.ok) {
         error(`Push to fork failed: ${push.err}`);
         process.exitCode = 1;
@@ -382,14 +400,20 @@ export async function publish(dir: string = process.cwd()): Promise<void> {
   }
 }
 
+// F6: Bump versions in the upstream codewiser.json manifest after publishing.
+// Previously only traversed modes[*].files and top-level files. Now also
+// traverses workflows[*].stages[*].files to match flattenRemoteManifest's shape.
+// Returns true if versions were bumped or new skills were inserted, false if
+// the manifest had no matching sections (caller should abort with an error).
 function bumpManifestVersions(
   manifest: Record<string, unknown>,
   paths: string[],
   versions: Map<string, string>,
-): void {
+): boolean {
   const wanted = new Set<string>(paths);
   let found = 0;
 
+  // Update existing entries in a files map (handles both string and object formats).
   const bumpFiles = (files: unknown): void => {
     if (!files || typeof files !== "object" || Array.isArray(files)) return;
     const rec = files as Record<string, unknown>;
@@ -408,6 +432,7 @@ function bumpManifestVersions(
     }
   };
 
+  // Bump in modes[*].files
   const modes = manifest.modes;
   if (modes && typeof modes === "object" && !Array.isArray(modes)) {
     for (const mode of Object.values(modes as Record<string, { files?: unknown }>)) {
@@ -416,25 +441,63 @@ function bumpManifestVersions(
       }
     }
   }
-  if ("files" in manifest) bumpFiles(manifest.files);
 
-  if (found > 0) return;
-
-  // The paths are not present upstream (e.g. brand-new skills): add them to
-  // every mode so teammates see the update.
-  if (modes && typeof modes === "object" && !Array.isArray(modes)) {
-    for (const mode of Object.values(modes as Record<string, { files?: Record<string, unknown> }>)) {
-      if (!mode || typeof mode !== "object") continue;
-      const files = mode.files;
-      if (files && typeof files === "object" && !Array.isArray(files)) {
-        const rec = files as Record<string, unknown>;
-        for (const path of paths) {
-          const next = versions.get(path);
-          if (next) rec[path] = next;
+  // F6: Bump in workflows[*].stages[*].files, mirroring the shape
+  // flattenRemoteManifest supports for workflow-format manifests.
+  const workflows = manifest.workflows;
+  if (workflows && typeof workflows === "object" && !Array.isArray(workflows)) {
+    for (const wf of Object.values(workflows as Record<string, { stages?: Record<string, { files?: unknown }> }>)) {
+      if (!wf || typeof wf !== "object") continue;
+      const stages = (wf as { stages?: Record<string, { files?: unknown }> }).stages;
+      if (!stages || typeof stages !== "object") continue;
+      for (const stage of Object.values(stages as Record<string, { files?: unknown }>)) {
+        if (stage && typeof stage === "object" && "files" in stage) {
+          bumpFiles((stage as { files?: unknown }).files);
         }
       }
     }
   }
+
+  // Bump in top-level files
+  if ("files" in manifest) bumpFiles(manifest.files);
+
+  if (found > 0) return true;
+
+  // F6: The paths are not present upstream (e.g. brand-new skills). Insert them
+  // into every mode and workflow stage so teammates see the update on their next
+  // pull. If no modes/workflows exist at all, found stays 0 and the caller gets
+  // an error — the manifest structure is unrecognized.
+  const insertInto = (files: unknown): void => {
+    if (!files || typeof files !== "object" || Array.isArray(files)) return;
+    const rec = files as Record<string, unknown>;
+    for (const path of paths) {
+      const next = versions.get(path);
+      if (next) {
+        rec[path] = next;
+        found++;
+      }
+    }
+  };
+
+  if (modes && typeof modes === "object" && !Array.isArray(modes)) {
+    for (const mode of Object.values(modes as Record<string, { files?: Record<string, unknown> }>)) {
+      if (!mode || typeof mode !== "object") continue;
+      insertInto((mode as { files?: Record<string, unknown> }).files);
+    }
+  }
+  if (workflows && typeof workflows === "object" && !Array.isArray(workflows)) {
+    for (const wf of Object.values(workflows as Record<string, { stages?: Record<string, { files?: Record<string, unknown> }> }>)) {
+      if (!wf || typeof wf !== "object") continue;
+      const stages = (wf as { stages?: Record<string, { files?: Record<string, unknown> }> }).stages;
+      if (!stages || typeof stages !== "object") continue;
+      for (const stage of Object.values(stages as Record<string, { files?: Record<string, unknown> }>)) {
+        if (!stage || typeof stage !== "object") continue;
+        insertInto((stage as { files?: Record<string, unknown> }).files);
+      }
+    }
+  }
+
+  return found > 0;
 }
 
 function buildTitle(paths: string[], versions: Map<string, string>): string {
@@ -443,16 +506,6 @@ function buildTitle(paths: string[], versions: Map<string, string>): string {
     return `${name} v${versions.get(p)}`;
   });
   return `skills: ${parts.join(", ")}`;
-}
-
-async function fetchRemoteContent(rawBase: string, path: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${rawBase}/${path}`, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
-    if (!res.ok) return null;
-    return await res.text();
-  } catch {
-    return null;
-  }
 }
 
 // Three-way merge of the team's latest content into a locally edited file, using

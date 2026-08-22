@@ -48,9 +48,6 @@ A centralized `.agents/` directory and a universal `AGENTS.md` instruction file 
 # Interactively set up codewiser in a target project directory
 bunx codewiser my-project
 
-# Or via npm (after publishing)
-npx codewiser my-project
-
 # Or if linked locally
 codewiser my-project
 ```
@@ -134,13 +131,13 @@ The exact workflow depends on the selected mode (Prototype, Spec Driven, or Rigi
 
 ## Adding a New Skill
 
-Skills are shared across all agents. Create a file at `.agents/skills/<skill-name>/SKILL.md` with instructions for what the skill does. Then add it to the relevant workflow stage's `files` section in `codewiser.json` with an initial version. The setup script symlinks this directory into each agent's private config so every agent can load it.
+Skills are shared across all agents. Create a file at `.agents/skills/<skill-name>/SKILL.md` with instructions for what the skill does. Then add it to the relevant workflow stage's `files` section in `codewiser.json` with an initial version. The `codewiser init` CLI symlinks this directory into each agent's private config so every agent can load it.
 
 Example: the [git-worktrees skill](.agents/skills/shared/git-worktrees/SKILL.md) was added to teach agents how to isolate feature work using branches and worktrees during concurrent multi-agent development.
 
 ## Requirements
 
-- **Bun** (recommended) or **Node.js 20.12+**
+- **Bun** — required to run the CLI (`bunx codewiser <project>` or `bun start <project>` after cloning)
 - Git
 
 ## Development
@@ -175,7 +172,7 @@ The CLI uses [@clack/prompts](https://github.com/natemoo-re/clack) for interacti
 - `src/commands/sync.ts` — `sync` subcommand: runs pull then publish
 - `src/utils/ui.ts` — Prompt wrappers with stdin resilience (@clack wrappers)
 - `src/utils/prompts.ts` — Typed prompt functions for agent/mode/workflow selection
-- `src/utils/download.ts` — HTTP download via `fetch()` + `Bun.write()`
+- `src/utils/download.ts` — HTTP download via `fetch()` + Node `fs.writeFile`
 - `src/utils/manifest.ts` — Manifest parsing, version comparison, file flattening
 - `src/utils/hash.ts` — SHA-256 content hashing for local-edit detection
 - `src/utils/sync-files.ts` — Shared download/compare engine (versions + hashes) used by init and pull

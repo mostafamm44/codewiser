@@ -1,16 +1,48 @@
+import { versionGt } from "./manifest";
+
+// Shared timeout for all GitHub API requests (manifest fetch + content fetch).
 export const MANIFEST_TIMEOUT_MS = 10000;
 
+// F18: Validate that decoded JSON is a non-null, non-array object.
+// The old code unconditionally cast res.json() as Record<string, unknown>,
+// which would crash downstream when the JSON was null, an array, or a scalar.
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Fetch the upstream codewiser.json manifest from GitHub.
+// Returns null on HTTP errors, network failures, or invalid JSON.
 export async function fetchManifest(rawBase: string): Promise<Record<string, unknown> | null> {
   const url = `${rawBase}/codewiser.json`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
     if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
+    const data: unknown = await res.json();
+    // F18: Validate the decoded JSON before returning it.
+    return isRecord(data) ? data : null;
   } catch {
     return null;
   }
 }
 
+// F24: Shared content fetcher moved from publish.ts and pull.ts.
+// Previously both commands had identical local closures that fetched
+// raw content with the same timeout and null-on-failure semantics.
+// Consolidated here to avoid duplication.
+export async function fetchRemoteContent(rawBase: string, path: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${rawBase}/${path}`, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+// Flatten the upstream manifest's file/version map into a flat Record<string, string>.
+// Supports three manifest formats: modes (per-mode file lists), workflows
+// (staged file lists), and flat files. The highest version wins when a file
+// appears in multiple modes.
 export function flattenRemoteManifest(raw: Record<string, unknown>, modeName?: string): Record<string, string> {
   const result: Record<string, string> = {};
 
@@ -27,7 +59,11 @@ export function flattenRemoteManifest(raw: Record<string, unknown>, modeName?: s
   const modes = raw.modes;
   if (modes && typeof modes === "object") {
     const modeEntries = modes as Record<string, { files?: Record<string, unknown> }>;
-    if (modeName && modeEntries[modeName]) {
+    if (modeName) {
+      // F17: When a configured mode is explicitly missing upstream, return
+      // an empty result instead of silently collecting all modes. The caller
+      // (pull.ts) then reports the missing mode and stops synchronization.
+      if (!modeEntries[modeName]) return result;
       collect(modeEntries[modeName]?.files ?? {});
     } else {
       for (const entry of Object.values(modeEntries)) collect(entry.files ?? {});
@@ -49,17 +85,4 @@ export function flattenRemoteManifest(raw: Record<string, unknown>, modeName?: s
   }
 
   return result;
-}
-
-function versionGt(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x > y) return true;
-    if (x < y) return false;
-  }
-  return false;
 }

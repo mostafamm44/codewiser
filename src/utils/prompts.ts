@@ -1,4 +1,7 @@
 import { pick, pickMany, confirmPrompt, textPrompt, BACK, EXIT } from "./ui";
+// F16: Shared version parser so publish prompts reject invalid versions
+// (e.g., "1.0.0-beta", "abc") before they enter the manifest ledger.
+import { isValidVersion } from "./manifest";
 
 export interface SelectedAgents {
   opencode: boolean;
@@ -112,16 +115,26 @@ export async function selectPublishFiles(paths: string[]): Promise<string[] | ty
   return selectFilesToUpdate(paths, "Which modified skills do you want to publish?");
 }
 
+// F16: Validate version input before returning. Without this, garbage like
+// "abc" or "1.0.0-beta" would enter the manifest and break versionLt/versionGt
+// comparisons (Number() produces NaN, all comparisons return false).
 export async function enterNewVersion(path: string, current: string): Promise<string | typeof EXIT> {
-  const next = await textPrompt({
-    message: `New version for ${path}:`,
-    placeholder: current,
-    initialValue: current,
-  });
-  if (next === EXIT) return EXIT;
-  const trimmed = next.trim();
-  if (!trimmed) return EXIT;
-  return trimmed;
+  for (;;) {
+    const next = await textPrompt({
+      message: `New version for ${path}:`,
+      placeholder: current,
+      initialValue: current,
+    });
+    if (next === EXIT) return EXIT;
+    const trimmed = next.trim();
+    if (!trimmed) return EXIT;
+    if (!isValidVersion(trimmed)) {
+      const ok = await confirmPrompt(`"${trimmed}" is not a valid version (expected numeric segments like 1.2.3). Try again?`);
+      if (ok === EXIT || !ok) return EXIT;
+      continue;
+    }
+    return trimmed;
+  }
 }
 
 export async function choosePullFirst(path: string): Promise<"merge" | "asIs" | typeof EXIT> {

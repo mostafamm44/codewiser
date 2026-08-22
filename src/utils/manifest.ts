@@ -1,12 +1,56 @@
+// F16: Shared version validation and comparison. These replaced the old
+// versionLt that used raw Number() per part — "1.0.0-beta" produced NaN,
+// making all comparisons return false silently. Now validates that each
+// segment is a pure integer before parsing.
+
+const VERSION_PART = /^\d+$/;
+
+// F16: Validates version strings as numeric-dot-separated (e.g. "1.2.3").
+// Rejects prerelease tags ("1.0.0-beta"), leading zeros ("01.02"), and
+// non-numeric garbage ("abc"). Used by enterNewVersion (prompts.ts) to
+// reject bad input before it enters the manifest ledger.
+export function isValidVersion(v: string): boolean {
+  if (!v || v.length === 0) return false;
+  const parts = v.split(".");
+  if (parts.length === 0) return false;
+  return parts.every((p) => VERSION_PART.test(p));
+}
+
+// F16: Converts a validated version string to a number array for comparison.
+// Returns [] for invalid versions, which makes versionLt/versionGt treat
+// them as less than any valid version (empty array < any non-empty array).
+export function parseVersion(v: string): number[] {
+  if (!isValidVersion(v)) return [];
+  return v.split(".").map(Number);
+}
+
+// F16: Replaced the old v1.split(".").map(Number) with parseVersion so
+// invalid versions are handled consistently rather than producing NaN.
 export function versionLt(v1: string, v2: string): boolean {
-  const p1 = v1.split(".").map(Number);
-  const p2 = v2.split(".").map(Number);
+  const p1 = parseVersion(v1);
+  const p2 = parseVersion(v2);
   const len = Math.max(p1.length, p2.length);
   for (let i = 0; i < len; i++) {
     const a = p1[i] ?? 0;
     const b = p2[i] ?? 0;
     if (a < b) return true;
     if (a > b) return false;
+  }
+  return false;
+}
+
+// F16: Added versionGt as a shared export. Previously this was a private
+// duplicate in remote.ts with identical logic. Now both files use the
+// same implementation from manifest.ts.
+export function versionGt(v1: string, v2: string): boolean {
+  const p1 = parseVersion(v1);
+  const p2 = parseVersion(v2);
+  const len = Math.max(p1.length, p2.length);
+  for (let i = 0; i < len; i++) {
+    const a = p1[i] ?? 0;
+    const b = p2[i] ?? 0;
+    if (a > b) return true;
+    if (a < b) return false;
   }
   return false;
 }
